@@ -9,22 +9,45 @@
 #include "render/ui/radial_menu.h"
 
 #include <MinHook.h>
+#include <cstddef>
 #include <cstdint>
 
 namespace radial_menu_mod::radial_switch {
 namespace {
 
-constexpr std::uintptr_t kEquipmentHudUpdateRva = 0x7757A0;
-constexpr std::uintptr_t kSwitchItemRequestCheckRva = 0x758350;
-constexpr std::uintptr_t kSwitchSpellRequestCheckRva = 0x7583C0;
-constexpr std::uintptr_t kSwitchSpellHoldCheckRva = 0x758510;
-constexpr std::uintptr_t kSwitchItemRepeatCheckRva = 0x758670;
-constexpr std::uintptr_t kSwitchSpellRepeatCheckRva = 0x758920;
-constexpr std::uintptr_t kCanSwitchSpellRva = 0x250850;
-constexpr std::uintptr_t kSwitchItemNextRva = 0x24FED0;
-constexpr std::uintptr_t kSwitchSpellNextRva = 0x250E60;
-constexpr std::uintptr_t kEquipmentChangeSoundEventRva = 0x814FC0;
+constexpr std::uintptr_t kEquipmentHudUpdateRva = 0x7756B0;
+constexpr std::uintptr_t kSwitchItemRequestCheckRva = 0x758260;
+constexpr std::uintptr_t kSwitchSpellRequestCheckRva = 0x7582D0;
+constexpr std::uintptr_t kSwitchSpellHoldCheckRva = 0x758420;
+constexpr std::uintptr_t kSwitchItemRepeatCheckRva = 0x758580;
+constexpr std::uintptr_t kSwitchSpellRepeatCheckRva = 0x758830;
+constexpr std::uintptr_t kCanSwitchSpellRva = 0x2507A0;
+constexpr std::uintptr_t kSwitchItemNextRva = 0x24FE20;
+constexpr std::uintptr_t kSwitchSpellNextRva = 0x250DB0;
+constexpr std::uintptr_t kEquipmentChangeSoundEventRva = 0x814ED0;
 constexpr std::uintptr_t kEquipmentChangeSoundEventVtableRva = 0x2A9DBD0;
+
+constexpr std::uint8_t kEquipmentHudUpdatePrefix[] = {
+    0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x56, 0x57
+};
+constexpr std::uint8_t kInputCheckStack78Prefix[] = {
+    0x4C, 0x8B, 0xDC, 0x48, 0x83, 0xEC, 0x78, 0x49, 0xC7, 0x43, 0xA8
+};
+constexpr std::uint8_t kSwitchHoldCheckPrefix[] = {
+    0x4C, 0x8B, 0xDC, 0x48, 0x81, 0xEC, 0x88, 0x00, 0x00, 0x00, 0x49, 0xC7, 0x43, 0x98
+};
+constexpr std::uint8_t kCanSwitchSpellPrefix[] = {
+    0x33, 0xD2, 0x48, 0x83, 0xC1, 0x10, 0x83, 0x39, 0xFF
+};
+constexpr std::uint8_t kSwitchItemNextPrefix[] = {
+    0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x91, 0xA0, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9
+};
+constexpr std::uint8_t kSwitchSpellNextPrefix[] = {
+    0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x91, 0x80, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9
+};
+constexpr std::uint8_t kEquipmentChangeSoundEventPrefix[] = {
+    0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x39, 0x00, 0x48, 0x8B, 0xD9
+};
 
 constexpr std::int32_t kSwitchSpell2Input = 24;
 constexpr std::int32_t kSwitchItem2Input = 25;
@@ -120,6 +143,17 @@ EquipmentChangeSoundEventFn g_equipment_change_sound_event = nullptr;
 void* g_equipment_change_sound_event_vtable = nullptr;
 bool g_searched_equipment_change_sound_event = false;
 
+bool HasExpectedBytes(std::uintptr_t address, const std::uint8_t* expected, std::size_t expected_size)
+{
+    if (!IsReadableMemory(reinterpret_cast<const void*>(address), expected_size)) return false;
+
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(address);
+    for (std::size_t i = 0; i < expected_size; ++i) {
+        if (bytes[i] != expected[i]) return false;
+    }
+    return true;
+}
+
 template <typename T>
 bool WriteCachedGameMemory(std::uintptr_t address, const T& value, CachedReadableRegion& region)
 {
@@ -199,7 +233,8 @@ void PlayEquipmentChangeSound()
         g_searched_equipment_change_sound_event = true;
         const auto function_address = GetModuleBase() + kEquipmentChangeSoundEventRva;
         const auto vtable_address = GetModuleBase() + kEquipmentChangeSoundEventVtableRva;
-        if (IsReadableMemory(reinterpret_cast<const void*>(function_address), 1) &&
+        if (HasExpectedBytes(function_address, kEquipmentChangeSoundEventPrefix,
+                sizeof(kEquipmentChangeSoundEventPrefix)) &&
             IsReadableMemory(reinterpret_cast<const void*>(vtable_address), sizeof(void*))) {
             g_equipment_change_sound_event = reinterpret_cast<EquipmentChangeSoundEventFn>(function_address);
             g_equipment_change_sound_event_vtable = reinterpret_cast<void*>(vtable_address);
@@ -514,14 +549,21 @@ void UpdateRadialInputStates()
 }
 
 template <typename Fn>
-void TryInstallHook(const char* name, std::uintptr_t rva, void* detour, Fn*& original, bool& installed, bool& failed)
+void TryInstallHook(const char* name,
+    std::uintptr_t rva,
+    const std::uint8_t* expected,
+    std::size_t expected_size,
+    void* detour,
+    Fn*& original,
+    bool& installed,
+    bool& failed)
 {
     if (installed || failed) return;
 
     const auto hook_address = GetModuleBase() + rva;
-    if (!IsReadableMemory(reinterpret_cast<const void*>(hook_address), 1)) {
+    if (!HasExpectedBytes(hook_address, expected, expected_size)) {
         failed = true;
-        Log("%s hook failed: target RVA is not readable.", name);
+        Log("%s hook failed: target RVA signature mismatch.", name);
         return;
     }
 
@@ -548,27 +590,36 @@ void TryInstallHooks()
 {
     if (g_hook_installation_complete) return;
 
-    TryInstallHook("Equipment HUD update", kEquipmentHudUpdateRva, reinterpret_cast<void*>(&HookedEquipmentHudUpdate),
+    TryInstallHook("Equipment HUD update", kEquipmentHudUpdateRva, kEquipmentHudUpdatePrefix,
+        sizeof(kEquipmentHudUpdatePrefix), reinterpret_cast<void*>(&HookedEquipmentHudUpdate),
         g_original_equipment_hud_update, g_equipment_hud_update_hook_installed, g_equipment_hud_update_hook_failed);
-    TryInstallHook("SwitchSpell request-check", kSwitchSpellRequestCheckRva,
+    TryInstallHook("SwitchSpell request-check", kSwitchSpellRequestCheckRva, kInputCheckStack78Prefix,
+        sizeof(kInputCheckStack78Prefix),
         reinterpret_cast<void*>(&HookedSwitchSpellRequestCheck), g_original_switch_spell_request_check,
         g_switch_spell_request_hook_installed, g_switch_spell_request_hook_failed);
-    TryInstallHook("SwitchItem request-check", kSwitchItemRequestCheckRva,
+    TryInstallHook("SwitchItem request-check", kSwitchItemRequestCheckRva, kInputCheckStack78Prefix,
+        sizeof(kInputCheckStack78Prefix),
         reinterpret_cast<void*>(&HookedSwitchItemRequestCheck), g_original_switch_item_request_check,
         g_switch_item_request_hook_installed, g_switch_item_request_hook_failed);
-    TryInstallHook("Switch hold-check", kSwitchSpellHoldCheckRva, reinterpret_cast<void*>(&HookedSwitchHoldCheck),
+    TryInstallHook("Switch hold-check", kSwitchSpellHoldCheckRva, kSwitchHoldCheckPrefix,
+        sizeof(kSwitchHoldCheckPrefix), reinterpret_cast<void*>(&HookedSwitchHoldCheck),
         g_original_switch_hold_check, g_switch_hold_hook_installed, g_switch_hold_hook_failed);
-    TryInstallHook("SwitchSpell repeat-check", kSwitchSpellRepeatCheckRva,
+    TryInstallHook("SwitchSpell repeat-check", kSwitchSpellRepeatCheckRva, kInputCheckStack78Prefix,
+        sizeof(kInputCheckStack78Prefix),
         reinterpret_cast<void*>(&HookedSwitchSpellRepeatCheck), g_original_switch_spell_repeat_check,
         g_switch_spell_repeat_hook_installed, g_switch_spell_repeat_hook_failed);
-    TryInstallHook("SwitchItem repeat-check", kSwitchItemRepeatCheckRva,
+    TryInstallHook("SwitchItem repeat-check", kSwitchItemRepeatCheckRva, kInputCheckStack78Prefix,
+        sizeof(kInputCheckStack78Prefix),
         reinterpret_cast<void*>(&HookedSwitchItemRepeatCheck), g_original_switch_item_repeat_check,
         g_switch_item_repeat_hook_installed, g_switch_item_repeat_hook_failed);
-    TryInstallHook("SwitchSpell can-switch", kCanSwitchSpellRva, reinterpret_cast<void*>(&HookedCanSwitchSpell),
+    TryInstallHook("SwitchSpell can-switch", kCanSwitchSpellRva, kCanSwitchSpellPrefix,
+        sizeof(kCanSwitchSpellPrefix), reinterpret_cast<void*>(&HookedCanSwitchSpell),
         g_original_can_switch_spell, g_can_switch_spell_hook_installed, g_can_switch_spell_hook_failed);
-    TryInstallHook("SwitchSpell next-slot", kSwitchSpellNextRva, reinterpret_cast<void*>(&HookedSwitchSpellNext),
+    TryInstallHook("SwitchSpell next-slot", kSwitchSpellNextRva, kSwitchSpellNextPrefix,
+        sizeof(kSwitchSpellNextPrefix), reinterpret_cast<void*>(&HookedSwitchSpellNext),
         g_original_switch_spell_next, g_switch_spell_next_hook_installed, g_switch_spell_next_hook_failed);
-    TryInstallHook("SwitchItem next-slot", kSwitchItemNextRva, reinterpret_cast<void*>(&HookedSwitchItemNext),
+    TryInstallHook("SwitchItem next-slot", kSwitchItemNextRva, kSwitchItemNextPrefix,
+        sizeof(kSwitchItemNextPrefix), reinterpret_cast<void*>(&HookedSwitchItemNext),
         g_original_switch_item_next, g_switch_item_next_hook_installed, g_switch_item_next_hook_failed);
 
     g_hook_installation_complete = (g_equipment_hud_update_hook_installed || g_equipment_hud_update_hook_failed) &&

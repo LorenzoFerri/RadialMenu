@@ -10,10 +10,14 @@
 namespace radial_menu_mod::radial_camera {
 namespace {
 
-constexpr std::uintptr_t kChrCamInputAccelerationUpdateRva = 0x3B2060;
+constexpr std::uintptr_t kChrCamInputAccelerationUpdateRva = 0x3B1F50;
 constexpr std::uintptr_t kChrCamPadAccelerationOffset = 0x90;
 constexpr std::uintptr_t kChrCamMoveAccelerationOffset = 0xA0;
 constexpr std::uintptr_t kChrCamLockOnInputOffset = 0xB0;
+
+constexpr std::uint8_t kChrCamInputAccelerationUpdatePrefix[] = {
+    0x48, 0x8B, 0xC4, 0x55, 0x48, 0x8D, 0x68, 0xA1, 0x48, 0x81, 0xEC, 0xA0, 0x00, 0x00, 0x00
+};
 
 constexpr float kAccelerationPresenceEpsilon = 0.001f;
 constexpr float kPadAccelerationSelectionDeadzone = 0.28f;
@@ -37,6 +41,17 @@ CachedReadableRegion g_lock_on_input_region = {};
 
 ChrCamInputAccelerationUpdateFn g_original_chr_cam_input_acceleration_update = nullptr;
 RadialActiveFn g_is_radial_active = nullptr;
+
+bool HasExpectedBytes(std::uintptr_t address, const std::uint8_t* expected, std::size_t expected_size)
+{
+    if (!IsReadableMemory(reinterpret_cast<const void*>(address), expected_size)) return false;
+
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(address);
+    for (std::size_t i = 0; i < expected_size; ++i) {
+        if (bytes[i] != expected[i]) return false;
+    }
+    return true;
+}
 
 float ClampStickAxis(float value)
 {
@@ -170,14 +185,21 @@ void HookedChrCamInputAccelerationUpdate(void* chr_cam, bool enabled)
 }
 
 template <typename Fn>
-void TryInstallHook(const char* name, std::uintptr_t rva, void* detour, Fn*& original, bool& installed, bool& failed)
+void TryInstallHook(const char* name,
+    std::uintptr_t rva,
+    const std::uint8_t* expected,
+    std::size_t expected_size,
+    void* detour,
+    Fn*& original,
+    bool& installed,
+    bool& failed)
 {
     if (installed || failed) return;
 
     const auto hook_address = GetModuleBase() + rva;
-    if (!IsReadableMemory(reinterpret_cast<const void*>(hook_address), 1)) {
+    if (!HasExpectedBytes(hook_address, expected, expected_size)) {
         failed = true;
-        Log("%s hook failed: target RVA is not readable.", name);
+        Log("%s hook failed: target RVA signature mismatch.", name);
         return;
     }
 
@@ -205,6 +227,7 @@ void TryInstallCameraHooks()
     if (g_camera_hook_installation_complete) return;
 
     TryInstallHook("ChrCam input acceleration update", kChrCamInputAccelerationUpdateRva,
+        kChrCamInputAccelerationUpdatePrefix, sizeof(kChrCamInputAccelerationUpdatePrefix),
         reinterpret_cast<void*>(&HookedChrCamInputAccelerationUpdate), g_original_chr_cam_input_acceleration_update,
         g_chr_cam_input_acceleration_update_hook_installed, g_chr_cam_input_acceleration_update_hook_failed);
     g_camera_hook_installation_complete = g_chr_cam_input_acceleration_update_hook_installed ||
