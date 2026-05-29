@@ -19,8 +19,11 @@ namespace radial_menu_mod::radial_config {
 namespace {
 
 constexpr wchar_t kConfigFileName[] = L"RadialMenu.ini";
-constexpr char kSection[] = "radial_menu";
-constexpr char kColorsSection[] = "colors";
+constexpr char kLayoutSection[] = "layout";
+constexpr char kWheelSection[] = "wheel";
+constexpr char kCentralPanelSection[] = "central_panel";
+constexpr char kSlotSection[] = "item_spell_slot";
+constexpr char kEditorSection[] = "editor";
 
 RadialConfig g_config = {};
 std::wstring g_config_path;
@@ -193,23 +196,6 @@ Color ReadColor(const mINI::INIMap<std::string>& section, const char* key, Color
     return ParseColor(section.get(key), fallback);
 }
 
-void ReadColors(const mINI::INIStructure& ini, RadialConfig& config)
-{
-    if (!ini.has(kColorsSection)) return;
-
-    const mINI::INIMap<std::string> colors = ini.get(kColorsSection);
-    config.screen_dim_color = ReadColor(colors, "screen_dim_color", config.screen_dim_color);
-    config.background_color = ReadColor(colors, "background_color", config.background_color);
-    config.selected_color = ReadColor(colors, "selected_color", config.selected_color);
-    config.border_color = ReadColor(colors, "border_color", config.border_color);
-    config.accent_color = ReadColor(colors, "accent_color", config.accent_color);
-    config.text_color = ReadColor(colors, "text_color", config.text_color);
-    config.icon_color = ReadColor(colors, "icon_color", config.icon_color);
-    config.sorcery_color = ReadColor(colors, "sorcery_color", config.sorcery_color);
-    config.incantation_color = ReadColor(colors, "incantation_color", config.incantation_color);
-    config.spell_color = ReadColor(colors, "spell_color", config.spell_color);
-}
-
 RadialConfig ReadConfig()
 {
     RadialConfig config = {};
@@ -220,41 +206,75 @@ RadialConfig ReadConfig()
         Log("Radial config: RadialMenu.ini not found or unreadable; using built-in defaults.");
         return config;
     }
-    if (!ini.has(kSection)) {
-        Log("Radial config: [radial_menu] section not found; using built-in defaults.");
-        return config;
+    if (!ini.has(kLayoutSection) && !ini.has(kWheelSection) && !ini.has(kCentralPanelSection) &&
+        !ini.has(kSlotSection) && !ini.has(kEditorSection)) {
+        Log("Radial config: no known sections found in RadialMenu.ini; using built-in defaults.");
     }
 
-    const mINI::INIMap<std::string> section = ini.get(kSection);
-    config.scale = ReadFloat(section, "scale", config.scale, 0.25f, 4.0f);
-    config.center_x = ReadFloat(section, "center_x", config.center_x, -1.0f, 2.0f);
-    config.center_y = ReadFloat(section, "center_y", config.center_y, -1.0f, 2.0f);
-    config.offset_x = ReadFloat(section, "offset_x", config.offset_x, -4000.0f, 4000.0f);
-    config.offset_y = ReadFloat(section, "offset_y", config.offset_y, -4000.0f, 4000.0f);
-    config.wheel_inner_radius = ReadFloat(section, "wheel_inner_radius", config.wheel_inner_radius, 0.0f, 2000.0f);
-    config.wheel_outer_radius = ReadFloat(section, "wheel_outer_radius", config.wheel_outer_radius, 1.0f, 2500.0f);
-    config.icon_size = ReadFloat(section, "icon_size", config.icon_size, 0.0f, 512.0f);
-    config.gap_size = ReadFloat(section, "gap_size", config.gap_size, 0.0f, 30.0f);
-    config.ring_padding = ReadFloat(section, "ring_padding", config.ring_padding, 0.0f, 80.0f);
-    config.opacity = ReadFloat(section, "opacity", config.opacity, 0.0f, 1.0f);
-    config.screen_dim_opacity = ReadFloat(section, "screen_dim_opacity", config.screen_dim_opacity, 0.0f, 1.0f);
-    config.show_center_panel = ReadBool(section, "show_center_panel", config.show_center_panel);
-    config.show_controls = ReadBool(section, "show_controls", config.show_controls);
-    config.editor_toggle_key = ReadKey(section, "editor_toggle_key", config.editor_toggle_key);
-    config.editor_toggle_shift = ReadBool(section, "editor_toggle_shift", config.editor_toggle_shift);
-    config.editor_toggle_ctrl = ReadBool(section, "editor_toggle_ctrl", config.editor_toggle_ctrl);
-    config.editor_toggle_alt = ReadBool(section, "editor_toggle_alt", config.editor_toggle_alt);
+    if (ini.has(kLayoutSection)) {
+        const mINI::INIMap<std::string> layout = ini.get(kLayoutSection);
+        config.scale = ReadFloat(layout, "scale", config.scale, 0.25f, 4.0f);
+        config.center_x = ReadFloat(layout, "center_x", config.center_x, -1.0f, 2.0f);
+        config.center_y = ReadFloat(layout, "center_y", config.center_y, -1.0f, 2.0f);
+        config.offset_x = ReadFloat(layout, "offset_x", config.offset_x, -4000.0f, 4000.0f);
+        config.offset_y = ReadFloat(layout, "offset_y", config.offset_y, -4000.0f, 4000.0f);
+    }
+
+    if (ini.has(kWheelSection)) {
+        const mINI::INIMap<std::string> wheel = ini.get(kWheelSection);
+        config.wheel_inner_radius = ReadFloat(wheel, "inner_size", config.wheel_inner_radius, 0.0f, 2000.0f);
+        config.wheel_outer_radius = ReadFloat(wheel, "outer_size", config.wheel_outer_radius, 1.0f, 2500.0f);
+        config.wheel_background_color = ReadColor(wheel, "background_color", config.wheel_background_color);
+        config.wheel_border_color = ReadColor(wheel, "border_color", config.wheel_border_color);
+        config.wheel_hidden = ReadBool(wheel, "hidden", config.wheel_hidden);
+    }
+
+    if (ini.has(kCentralPanelSection)) {
+        const mINI::INIMap<std::string> central_panel = ini.get(kCentralPanelSection);
+        config.central_panel_hidden = ReadBool(central_panel, "hidden", config.central_panel_hidden);
+        config.central_panel_outer_radius = ReadFloat(central_panel, "outer_size",
+            config.central_panel_outer_radius, 1.0f, 2500.0f);
+        config.central_panel_background_color = ReadColor(central_panel, "background_color",
+            config.central_panel_background_color);
+        config.central_panel_border_color = ReadColor(central_panel, "border_color", config.central_panel_border_color);
+    }
+
+    if (ini.has(kSlotSection)) {
+        const mINI::INIMap<std::string> slot = ini.get(kSlotSection);
+        config.slot_inner_radius = ReadFloat(slot, "inner_size", config.slot_inner_radius, 0.0f, 2000.0f);
+        config.slot_outer_radius = ReadFloat(slot, "outer_size", config.slot_outer_radius, 1.0f, 2500.0f);
+        config.slot_background_color = ReadColor(slot, "background_color", config.slot_background_color);
+        config.slot_selected_background_color = ReadColor(slot, "selected_background_color",
+            config.slot_selected_background_color);
+        config.slot_border_color = ReadColor(slot, "border_color", config.slot_border_color);
+        config.slot_selected_sorcery_border_color = ReadColor(slot, "selected_sorcery_border_color",
+            config.slot_selected_sorcery_border_color);
+        config.slot_selected_incantation_border_color = ReadColor(slot, "selected_incantation_border_color",
+            config.slot_selected_incantation_border_color);
+        config.slot_details = ReadBool(slot, "details", config.slot_details);
+        config.slot_gap_degrees = ReadFloat(slot, "gap_degrees", config.slot_gap_degrees, 0.0f, 30.0f);
+    }
+
+    if (ini.has(kEditorSection)) {
+        const mINI::INIMap<std::string> editor = ini.get(kEditorSection);
+        config.editor_toggle_key = ReadKey(editor, "toggle_key", config.editor_toggle_key);
+        config.editor_toggle_shift = ReadBool(editor, "toggle_shift", config.editor_toggle_shift);
+        config.editor_toggle_ctrl = ReadBool(editor, "toggle_ctrl", config.editor_toggle_ctrl);
+        config.editor_toggle_alt = ReadBool(editor, "toggle_alt", config.editor_toggle_alt);
+    }
 
     if (config.wheel_inner_radius >= config.wheel_outer_radius) {
         config.wheel_inner_radius = std::max(0.0f, config.wheel_outer_radius - 1.0f);
     }
-    ReadColors(ini, config);
+    if (config.slot_inner_radius >= config.slot_outer_radius) {
+        config.slot_inner_radius = std::max(0.0f, config.slot_outer_radius - 1.0f);
+    }
     return config;
 }
 
 void LogConfigSummary()
 {
-    Log("Radial config loaded: scale=%.2f center=(%.2f, %.2f) offset=(%.0f, %.0f) wheel_radii=(%.0f, %.0f) icon_size=%.0f gap_size=%.1f ring_padding=%.0f opacity=%.2f screen_dim=%.2f center_panel=%d controls=%d.",
+    Log("Radial config loaded: scale=%.2f center=(%.2f, %.2f) offset=(%.0f, %.0f) wheel=(%.0f, %.0f hidden=%d) center=(%.0f hidden=%d) slot=(%.0f, %.0f gap=%.1f details=%d).",
         g_config.scale,
         g_config.center_x,
         g_config.center_y,
@@ -262,13 +282,13 @@ void LogConfigSummary()
         g_config.offset_y,
         g_config.wheel_inner_radius,
         g_config.wheel_outer_radius,
-        g_config.icon_size,
-        g_config.gap_size,
-        g_config.ring_padding,
-        g_config.opacity,
-        g_config.screen_dim_opacity,
-        static_cast<int>(g_config.show_center_panel),
-        static_cast<int>(g_config.show_controls));
+        static_cast<int>(g_config.wheel_hidden),
+        g_config.central_panel_outer_radius,
+        static_cast<int>(g_config.central_panel_hidden),
+        g_config.slot_inner_radius,
+        g_config.slot_outer_radius,
+        g_config.slot_gap_degrees,
+        static_cast<int>(g_config.slot_details));
 }
 
 void LoadFromDisk()
@@ -283,37 +303,42 @@ void LoadFromDisk()
 
 void WriteConfigToIni(mINI::INIStructure& ini, const RadialConfig& config)
 {
-    auto& section = ini[kSection];
-    section["scale"] = FormatFloat(config.scale, 2);
-    section["center_x"] = FormatFloat(config.center_x, 2);
-    section["center_y"] = FormatFloat(config.center_y, 2);
-    section["offset_x"] = FormatFloat(config.offset_x, 0);
-    section["offset_y"] = FormatFloat(config.offset_y, 0);
-    section["wheel_inner_radius"] = FormatFloat(config.wheel_inner_radius, 0);
-    section["wheel_outer_radius"] = FormatFloat(config.wheel_outer_radius, 0);
-    section["icon_size"] = FormatFloat(config.icon_size, 0);
-    section["gap_size"] = FormatFloat(config.gap_size, 1);
-    section["ring_padding"] = FormatFloat(config.ring_padding, 0);
-    section["opacity"] = FormatFloat(config.opacity, 2);
-    section["screen_dim_opacity"] = FormatFloat(config.screen_dim_opacity, 2);
-    section["show_center_panel"] = FormatBool(config.show_center_panel);
-    section["show_controls"] = FormatBool(config.show_controls);
-    section["editor_toggle_key"] = FormatKey(config.editor_toggle_key);
-    section["editor_toggle_shift"] = FormatBool(config.editor_toggle_shift);
-    section["editor_toggle_ctrl"] = FormatBool(config.editor_toggle_ctrl);
-    section["editor_toggle_alt"] = FormatBool(config.editor_toggle_alt);
+    auto& layout = ini[kLayoutSection];
+    layout["scale"] = FormatFloat(config.scale, 2);
+    layout["center_x"] = FormatFloat(config.center_x, 2);
+    layout["center_y"] = FormatFloat(config.center_y, 2);
+    layout["offset_x"] = FormatFloat(config.offset_x, 0);
+    layout["offset_y"] = FormatFloat(config.offset_y, 0);
 
-    auto& colors = ini[kColorsSection];
-    colors["screen_dim_color"] = FormatColor(config.screen_dim_color);
-    colors["background_color"] = FormatColor(config.background_color);
-    colors["selected_color"] = FormatColor(config.selected_color);
-    colors["border_color"] = FormatColor(config.border_color);
-    colors["accent_color"] = FormatColor(config.accent_color);
-    colors["text_color"] = FormatColor(config.text_color);
-    colors["icon_color"] = FormatColor(config.icon_color);
-    colors["sorcery_color"] = FormatColor(config.sorcery_color);
-    colors["incantation_color"] = FormatColor(config.incantation_color);
-    colors["spell_color"] = FormatColor(config.spell_color);
+    auto& wheel = ini[kWheelSection];
+    wheel["inner_size"] = FormatFloat(config.wheel_inner_radius, 0);
+    wheel["outer_size"] = FormatFloat(config.wheel_outer_radius, 0);
+    wheel["background_color"] = FormatColor(config.wheel_background_color);
+    wheel["border_color"] = FormatColor(config.wheel_border_color);
+    wheel["hidden"] = FormatBool(config.wheel_hidden);
+
+    auto& central_panel = ini[kCentralPanelSection];
+    central_panel["hidden"] = FormatBool(config.central_panel_hidden);
+    central_panel["outer_size"] = FormatFloat(config.central_panel_outer_radius, 0);
+    central_panel["background_color"] = FormatColor(config.central_panel_background_color);
+    central_panel["border_color"] = FormatColor(config.central_panel_border_color);
+
+    auto& slot = ini[kSlotSection];
+    slot["inner_size"] = FormatFloat(config.slot_inner_radius, 0);
+    slot["outer_size"] = FormatFloat(config.slot_outer_radius, 0);
+    slot["background_color"] = FormatColor(config.slot_background_color);
+    slot["selected_background_color"] = FormatColor(config.slot_selected_background_color);
+    slot["border_color"] = FormatColor(config.slot_border_color);
+    slot["selected_sorcery_border_color"] = FormatColor(config.slot_selected_sorcery_border_color);
+    slot["selected_incantation_border_color"] = FormatColor(config.slot_selected_incantation_border_color);
+    slot["details"] = FormatBool(config.slot_details);
+    slot["gap_degrees"] = FormatFloat(config.slot_gap_degrees, 1);
+
+    auto& editor = ini[kEditorSection];
+    editor["toggle_key"] = FormatKey(config.editor_toggle_key);
+    editor["toggle_shift"] = FormatBool(config.editor_toggle_shift);
+    editor["toggle_ctrl"] = FormatBool(config.editor_toggle_ctrl);
+    editor["toggle_alt"] = FormatBool(config.editor_toggle_alt);
 }
 
 }  // namespace
@@ -357,7 +382,6 @@ bool Save()
 
     mINI::INIFile file(g_config_path);
     mINI::INIStructure ini;
-    (void)file.read(ini);
     WriteConfigToIni(ini, g_config);
     const bool saved = file.write(ini, true);
     if (!saved) {

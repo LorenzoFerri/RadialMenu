@@ -167,31 +167,40 @@ void Draw()
         ImGui::SliderFloat("Center Y", &config.center_y, -1.0f, 2.0f, "%.2f"); MarkEdited();
         ImGui::SliderFloat("Offset X", &config.offset_x, -4000.0f, 4000.0f, "%.0f"); MarkEdited();
         ImGui::SliderFloat("Offset Y", &config.offset_y, -4000.0f, 4000.0f, "%.0f"); MarkEdited();
-        ImGui::SliderFloat("Wheel inner radius", &config.wheel_inner_radius, 0.0f, 2000.0f, "%.0f"); MarkEdited();
-        ImGui::SliderFloat("Wheel outer radius", &config.wheel_outer_radius, 1.0f, 2500.0f, "%.0f"); MarkEdited();
+    }
+
+    if (ImGui::CollapsingHeader("Wheel", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::Checkbox("Hidden##wheel", &config.wheel_hidden)) g_saved_message = false;
+        ImGui::SliderFloat("Inner size##wheel", &config.wheel_inner_radius, 0.0f, 2000.0f, "%.0f"); MarkEdited();
+        ImGui::SliderFloat("Outer size##wheel", &config.wheel_outer_radius, 1.0f, 2500.0f, "%.0f"); MarkEdited();
         if (config.wheel_inner_radius >= config.wheel_outer_radius) {
             config.wheel_inner_radius = std::max(0.0f, config.wheel_outer_radius - 1.0f);
         }
-        ImGui::SliderFloat("Icon size", &config.icon_size, 0.0f, 512.0f, "%.0f"); MarkEdited();
-        ImGui::SliderFloat("Gap size", &config.gap_size, 0.0f, 30.0f, "%.1f degrees"); MarkEdited();
-        ImGui::SliderFloat("Ring padding", &config.ring_padding, 0.0f, 80.0f, "%.0f"); MarkEdited();
-        ImGui::SliderFloat("Opacity", &config.opacity, 0.0f, 1.0f, "%.2f"); MarkEdited();
-        ImGui::SliderFloat("Screen dim opacity", &config.screen_dim_opacity, 0.0f, 1.0f, "%.2f"); MarkEdited();
-        if (ImGui::Checkbox("Show center panel/details", &config.show_center_panel)) g_saved_message = false;
-        if (ImGui::Checkbox("Show controls text", &config.show_controls)) g_saved_message = false;
+        ColorEdit("Background color##wheel", config.wheel_background_color);
+        ColorEdit("Border color##wheel", config.wheel_border_color);
     }
 
-    if (ImGui::CollapsingHeader("Colors", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ColorEdit("Screen dim", config.screen_dim_color);
-        ColorEdit("Background", config.background_color);
-        ColorEdit("Selected", config.selected_color);
-        ColorEdit("Border", config.border_color);
-        ColorEdit("Accent", config.accent_color);
-        ColorEdit("Text", config.text_color);
-        ColorEdit("Icon", config.icon_color);
-        ColorEdit("Sorcery", config.sorcery_color);
-        ColorEdit("Incantation", config.incantation_color);
-        ColorEdit("Spell", config.spell_color);
+    if (ImGui::CollapsingHeader("Central Panel", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::Checkbox("Hidden##central_panel", &config.central_panel_hidden)) g_saved_message = false;
+        ImGui::SliderFloat("Outer size##central_panel", &config.central_panel_outer_radius, 1.0f, 2500.0f,
+            "%.0f"); MarkEdited();
+        ColorEdit("Background color##central_panel", config.central_panel_background_color);
+        ColorEdit("Border color##central_panel", config.central_panel_border_color);
+    }
+
+    if (ImGui::CollapsingHeader("Item/Spell Slot", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SliderFloat("Inner size##slot", &config.slot_inner_radius, 0.0f, 2000.0f, "%.0f"); MarkEdited();
+        ImGui::SliderFloat("Outer size##slot", &config.slot_outer_radius, 1.0f, 2500.0f, "%.0f"); MarkEdited();
+        if (config.slot_inner_radius >= config.slot_outer_radius) {
+            config.slot_inner_radius = std::max(0.0f, config.slot_outer_radius - 1.0f);
+        }
+        ColorEdit("Background color##slot", config.slot_background_color);
+        ColorEdit("Selected background color##slot", config.slot_selected_background_color);
+        ColorEdit("Border color##slot", config.slot_border_color);
+        ColorEdit("Selected sorcery border color##slot", config.slot_selected_sorcery_border_color);
+        ColorEdit("Selected incantation border color##slot", config.slot_selected_incantation_border_color);
+        if (ImGui::Checkbox("Details arcs/lines##slot", &config.slot_details)) g_saved_message = false;
+        ImGui::SliderFloat("Gap##slot", &config.slot_gap_degrees, 0.0f, 30.0f, "%.1f degrees"); MarkEdited();
     }
 
     if (ImGui::CollapsingHeader("Editor Hotkey")) {
