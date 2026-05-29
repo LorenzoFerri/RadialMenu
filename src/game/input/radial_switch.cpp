@@ -6,6 +6,7 @@
 #include "game/input/radial_camera.h"
 #include "game/state/gameplay_state.h"
 #include "input/radial_input.h"
+#include "render/ui/config_editor.h"
 #include "render/ui/radial_menu.h"
 
 #include <MinHook.h>
@@ -327,6 +328,8 @@ bool HookedSwitchItemRequestCheck(void* input_state)
 
 bool HookedSwitchHoldCheck(void* input_state, std::int32_t action)
 {
+    if (config_editor::IsOpen()) return false;
+
     if (action != kSwitchSpellAction && action != kSwitchItemAction) {
         return g_original_switch_hold_check != nullptr ? g_original_switch_hold_check(input_state, action) : false;
     }

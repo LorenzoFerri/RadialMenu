@@ -1,5 +1,7 @@
 #include "render/ui/radial_menu_draw.h"
 
+#include "config/radial_config.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -9,21 +11,23 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kBaseViewportHeight = 1080.0f;
-constexpr float kWheelInnerRadius = 118.0f;
-constexpr float kWheelOuterRadius = 248.0f;
-constexpr float kWheelIconRadius = 182.0f;
-constexpr float kCenterPanelRadius = 102.0f;
-constexpr float kSegmentGapRadians = 0.028f;
 
 struct RadialLayout {
+    const radial_config::RadialConfig* config = nullptr;
     ImGuiViewport* viewport = nullptr;
     ImVec2 center{};
     ImVec2 bottom_right{};
     float ui_scale = 1.0f;
     float wheel_inner_radius = 0.0f;
     float wheel_outer_radius = 0.0f;
-    float wheel_icon_radius = 0.0f;
     float center_panel_radius = 0.0f;
+    float ring_padding = 0.0f;
+    float icon_size = 0.0f;
+    float segment_gap_radians = 0.0f;
+    float opacity = 1.0f;
+    float screen_dim_opacity = 0.28f;
+    bool show_center_panel = true;
+    bool show_controls = true;
 };
 
 struct SelectedDetailsCache {
@@ -65,17 +69,24 @@ const char* GetCategoryLabel(const RadialSlot& slot)
     }
 }
 
-ImU32 GetCategoryColor(const RadialSlot& slot, bool is_selected)
+const radial_config::Color& GetCategoryColor(const RadialSlot& slot, const radial_config::RadialConfig& config)
 {
     switch (slot.category) {
     case SpellCategory::sorcery:
-        return is_selected ? IM_COL32(155, 240, 255, 255) : IM_COL32(86, 184, 216, 255);
+        return config.sorcery_color;
     case SpellCategory::incantation:
-        return is_selected ? IM_COL32(255, 219, 170, 255) : IM_COL32(220, 186, 132, 255);
+        return config.incantation_color;
     case SpellCategory::unknown:
     default:
-        return is_selected ? IM_COL32(220, 230, 235, 255) : IM_COL32(170, 182, 188, 255);
+        return config.spell_color;
     }
+}
+
+ImU32 ColorWithOpacity(const radial_config::Color& color, float opacity, float alpha_scale = 1.0f)
+{
+    const int alpha = std::clamp(
+        static_cast<int>(std::round(static_cast<float>(color.a) * opacity * alpha_scale)), 0, 255);
+    return IM_COL32(color.r, color.g, color.b, alpha);
 }
 
 ImVec2 PolarPoint(const ImVec2& center, float angle, float radius)
@@ -96,6 +107,14 @@ void AddRingSegment(ImDrawList* draw_list, const ImVec2& center, float inner_rad
     draw_list->PathArcTo(center, outer_radius, start_angle, end_angle, segments);
     draw_list->PathArcTo(center, inner_radius, end_angle, start_angle, segments);
     draw_list->PathStroke(border, ImDrawFlags_Closed, border_thickness);
+}
+
+void AddCircleRing(ImDrawList* draw_list, const ImVec2& center, float inner_radius, float outer_radius,
+    ImU32 color)
+{
+    const float thickness = std::max(0.0f, outer_radius - inner_radius);
+    if (thickness <= 0.0f) return;
+    draw_list->AddCircle(center, inner_radius + (thickness * 0.5f), color, 72, thickness);
 }
 
 void AddSegmentSeparator(ImDrawList* draw_list, const ImVec2& center, float angle, float inner_radius,
@@ -174,23 +193,53 @@ std::vector<std::string> WrapTextLines(ImFont* font, float font_size, const std:
 
 RadialLayout BuildLayout()
 {
+    const radial_config::RadialConfig& config = radial_config::Get();
     RadialLayout layout{};
+    layout.config = &config;
     layout.viewport = ImGui::GetMainViewport();
     layout.center = {
-        layout.viewport->Pos.x + (layout.viewport->Size.x * 0.5f),
-        layout.viewport->Pos.y + (layout.viewport->Size.y * 0.5f),
+        layout.viewport->Pos.x + (layout.viewport->Size.x * config.center_x) + config.offset_x,
+        layout.viewport->Pos.y + (layout.viewport->Size.y * config.center_y) + config.offset_y,
     };
     layout.bottom_right = {
         layout.viewport->Pos.x + layout.viewport->Size.x,
         layout.viewport->Pos.y + layout.viewport->Size.y,
     };
     const float viewport_min = std::min(layout.viewport->Size.x, layout.viewport->Size.y);
-    layout.ui_scale = std::clamp(viewport_min / kBaseViewportHeight, 0.9f, 1.85f);
-    layout.wheel_inner_radius = kWheelInnerRadius * layout.ui_scale;
-    layout.wheel_outer_radius = kWheelOuterRadius * layout.ui_scale;
-    layout.wheel_icon_radius = kWheelIconRadius * layout.ui_scale;
-    layout.center_panel_radius = kCenterPanelRadius * layout.ui_scale;
+    layout.ui_scale = std::clamp(viewport_min / kBaseViewportHeight, 0.9f, 1.85f) * config.scale;
+    layout.wheel_inner_radius = config.wheel_inner_radius * layout.ui_scale;
+    layout.wheel_outer_radius = config.wheel_outer_radius * layout.ui_scale;
+    layout.ring_padding = config.ring_padding * layout.ui_scale;
+    layout.center_panel_radius = std::max(0.0f, layout.wheel_inner_radius - layout.ring_padding);
+    layout.icon_size = config.icon_size * layout.ui_scale;
+    layout.segment_gap_radians = (config.gap_size * kPi / 180.0f) * 0.5f;
+    layout.opacity = config.opacity;
+    layout.screen_dim_opacity = config.screen_dim_opacity;
+    layout.show_center_panel = config.show_center_panel;
+    layout.show_controls = config.show_controls;
     return layout;
+}
+
+float IconRadiusForSegment(const RadialLayout& layout, float segment_angle)
+{
+    const float inner = std::min(layout.wheel_inner_radius + layout.ring_padding,
+        layout.wheel_outer_radius - (1.0f * layout.ui_scale));
+    const float outer = layout.wheel_outer_radius;
+    if (outer <= inner) return inner;
+
+    const float denominator = outer * outer - inner * inner;
+    if (denominator <= 0.0f || segment_angle <= 0.0f) return (inner + outer) * 0.5f;
+
+    const float radial_centroid = (2.0f / 3.0f) *
+        ((outer * outer * outer) - (inner * inner * inner)) / denominator;
+    const float half_angle = segment_angle * 0.5f;
+    float radius = radial_centroid * (std::sin(half_angle) / half_angle);
+
+    const float margin = 2.0f * layout.ui_scale;
+    const float min_radius = inner + (layout.icon_size * 0.5f) + margin;
+    const float max_radius = outer - (layout.icon_size * 0.5f) - margin;
+    if (min_radius <= max_radius) radius = std::clamp(radius, min_radius, max_radius);
+    return radius;
 }
 
 void BeginOverlayWindow(const RadialLayout& layout)
@@ -203,80 +252,127 @@ void BeginOverlayWindow(const RadialLayout& layout)
     ImGui::Begin("RadialMenuOverlay", nullptr, flags);
 }
 
-void DrawSlotIcon(ImDrawList* draw_list, const ImVec2& center, const IconTextureInfo& icon, float scale)
+void DrawSlotIcon(ImDrawList* draw_list, const ImVec2& center, const IconTextureInfo& icon,
+    const radial_config::Color& icon_color, float icon_size, float ui_scale, float opacity)
 {
     if (icon.texture == ImTextureID{}) return;
 
-    const float half_extent = 40.0f * scale;
-    const float vertical_offset = 4.0f * scale;
-    const ImVec2 image_min = {center.x - half_extent, center.y - half_extent - vertical_offset};
-    const ImVec2 image_max = {center.x + half_extent, center.y + half_extent - vertical_offset};
-    draw_list->AddImageRounded(icon.texture, image_min, image_max, icon.uv_min, icon.uv_max, IM_COL32_WHITE, 10.0f * scale);
+    const float half_extent = icon_size * 0.5f;
+    const ImVec2 image_min = {center.x - half_extent, center.y - half_extent};
+    const ImVec2 image_max = {center.x + half_extent, center.y + half_extent};
+    draw_list->AddImageRounded(icon.texture, image_min, image_max, icon.uv_min, icon.uv_max,
+        ColorWithOpacity(icon_color, opacity), 10.0f * ui_scale);
 }
 
 void DrawBackdrop(ImDrawList* draw_list, const RadialLayout& layout)
 {
-    const float overlay_shadow_radius = layout.wheel_outer_radius + (22.0f * layout.ui_scale);
-    const float outer_frame_radius = layout.wheel_outer_radius + (8.0f * layout.ui_scale);
+    const radial_config::RadialConfig& config = *layout.config;
 
-    draw_list->AddRectFilled(layout.viewport->Pos, layout.bottom_right, IM_COL32(0, 0, 0, 72));
-    draw_list->AddCircleFilled(layout.center, overlay_shadow_radius, IM_COL32(0, 0, 0, 48), 72);
-    draw_list->AddCircleFilled(layout.center, outer_frame_radius, IM_COL32(12, 11, 10, 210), 72);
-    draw_list->AddCircle(layout.center, outer_frame_radius, IM_COL32(110, 94, 64, 180), 72, 2.0f * layout.ui_scale);
-    draw_list->AddCircle(layout.center, layout.wheel_outer_radius - (4.0f * layout.ui_scale), IM_COL32(171, 148, 102, 170), 72, 1.5f * layout.ui_scale);
+    draw_list->AddRectFilled(layout.viewport->Pos, layout.bottom_right,
+        ColorWithOpacity(config.screen_dim_color, layout.screen_dim_opacity));
+    AddCircleRing(draw_list, layout.center, layout.wheel_inner_radius, layout.wheel_outer_radius,
+        ColorWithOpacity(config.background_color, layout.opacity, 0.94f));
+}
+
+void DrawWheelCenterRims(ImDrawList* draw_list, const RadialLayout& layout)
+{
+    const radial_config::RadialConfig& config = *layout.config;
+    draw_list->AddCircle(layout.center, layout.wheel_inner_radius,
+        ColorWithOpacity(config.border_color, layout.opacity), 72, 2.0f * layout.ui_scale);
+    draw_list->AddCircle(layout.center, layout.wheel_outer_radius,
+        ColorWithOpacity(config.border_color, layout.opacity), 72, 2.0f * layout.ui_scale);
 }
 
 void DrawWheel(ImDrawList* draw_list, const RadialLayout& layout, const std::vector<RadialSlot>& slots,
-    int selected_slot, const std::vector<IconTextureInfo>& icon_textures)
+    int selected_slot)
 {
+    const radial_config::RadialConfig& config = *layout.config;
+    const float slice_inner_radius = std::min(layout.wheel_inner_radius + layout.ring_padding,
+        layout.wheel_outer_radius - (1.0f * layout.ui_scale));
+    const float slice_outer_radius = std::max(slice_inner_radius + (1.0f * layout.ui_scale),
+        layout.wheel_outer_radius - layout.ring_padding);
     const std::size_t slot_count = std::max<std::size_t>(slots.size(), 1);
     const float step = (2.0f * kPi) / static_cast<float>(slot_count);
+    const float segment_gap_radians = std::min(layout.segment_gap_radians, step * 0.45f);
 
     for (std::size_t i = 0; i < slots.size(); ++i) {
         const bool is_selected = static_cast<int>(i) == selected_slot;
-        const float start_angle = (-kPi * 0.5f) + (step * static_cast<float>(i)) + kSegmentGapRadians;
-        const float end_angle = (-kPi * 0.5f) + (step * static_cast<float>(i + 1)) - kSegmentGapRadians;
-        const float mid_angle = (start_angle + end_angle) * 0.5f;
-        const ImVec2 icon_center = PolarPoint(layout.center, mid_angle, layout.wheel_icon_radius);
+        const float start_angle = (-kPi * 0.5f) + (step * static_cast<float>(i)) + segment_gap_radians;
+        const float end_angle = (-kPi * 0.5f) + (step * static_cast<float>(i + 1)) - segment_gap_radians;
 
-        const ImU32 fill = is_selected ? IM_COL32(40, 36, 30, 232) : IM_COL32(24, 22, 19, 224);
-        const ImU32 border = is_selected ? GetCategoryColor(slots[i], true) : IM_COL32(110, 95, 65, 170);
+        const ImU32 fill = ColorWithOpacity(is_selected ? config.selected_color : config.background_color,
+            layout.opacity);
+        const ImU32 border = is_selected ?
+            ColorWithOpacity(GetCategoryColor(slots[i], config), layout.opacity) :
+            ColorWithOpacity(config.border_color, layout.opacity, 0.95f);
         const float border_thickness = (is_selected ? 3.5f : 1.25f) * layout.ui_scale;
-        AddRingSegment(draw_list, layout.center, layout.wheel_inner_radius, layout.wheel_outer_radius, start_angle, end_angle, fill, border, border_thickness);
+        AddRingSegment(draw_list, layout.center, slice_inner_radius, slice_outer_radius, start_angle,
+            end_angle, fill, border, border_thickness);
 
-        const ImU32 inner_trim = is_selected ? GetCategoryColor(slots[i], false) : IM_COL32(146, 124, 84, 120);
-        const ImU32 outer_trim = is_selected ? GetCategoryColor(slots[i], false) : IM_COL32(120, 102, 72, 110);
-        AddArcStroke(draw_list, layout.center, layout.wheel_inner_radius + (8.0f * layout.ui_scale), start_angle + 0.03f, end_angle - 0.03f, inner_trim, 1.0f * layout.ui_scale);
-        AddArcStroke(draw_list, layout.center, layout.wheel_outer_radius - (16.0f * layout.ui_scale), start_angle + 0.05f, end_angle - 0.05f, outer_trim, 1.0f * layout.ui_scale);
-
-        const IconTextureInfo empty_icon = {};
-        DrawSlotIcon(draw_list, icon_center, i < icon_textures.size() ? icon_textures[i] : empty_icon,
-            layout.ui_scale);
+        const ImU32 inner_trim = is_selected ?
+            ColorWithOpacity(GetCategoryColor(slots[i], config), layout.opacity, 0.75f) :
+            ColorWithOpacity(config.border_color, layout.opacity, 0.65f);
+        const ImU32 outer_trim = is_selected ?
+            ColorWithOpacity(GetCategoryColor(slots[i], config), layout.opacity, 0.75f) :
+            ColorWithOpacity(config.border_color, layout.opacity, 0.65f);
+        AddArcStroke(draw_list, layout.center, slice_inner_radius + layout.ring_padding, start_angle + 0.03f,
+            end_angle - 0.03f, inner_trim, 1.0f * layout.ui_scale);
+        AddArcStroke(draw_list, layout.center, slice_outer_radius - layout.ring_padding,
+            start_angle + 0.05f, end_angle - 0.05f, outer_trim, 1.0f * layout.ui_scale);
     }
 
     for (std::size_t i = 0; i < slot_count; ++i) {
         const float separator_angle = (-kPi * 0.5f) + (step * static_cast<float>(i));
-        AddSegmentSeparator(draw_list, layout.center, separator_angle, layout.wheel_inner_radius + (2.0f * layout.ui_scale), layout.wheel_outer_radius - (10.0f * layout.ui_scale), IM_COL32(97, 82, 56, 160), 1.0f * layout.ui_scale);
+        AddSegmentSeparator(draw_list, layout.center, separator_angle, slice_inner_radius + (2.0f * layout.ui_scale),
+            slice_outer_radius - (2.0f * layout.ui_scale),
+            ColorWithOpacity(config.border_color, layout.opacity, 0.9f), 1.0f * layout.ui_scale);
+    }
+}
+
+void DrawWheelIcons(ImDrawList* draw_list, const RadialLayout& layout, std::size_t slot_count,
+    const std::vector<IconTextureInfo>& icon_textures)
+{
+    if (slot_count == 0) return;
+
+    const float step = (2.0f * kPi) / static_cast<float>(slot_count);
+    const float segment_gap_radians = std::min(layout.segment_gap_radians, step * 0.45f);
+    const float segment_angle = std::max(0.0f, step - (segment_gap_radians * 2.0f));
+    const float icon_radius = IconRadiusForSegment(layout, segment_angle);
+    const IconTextureInfo empty_icon = {};
+
+    for (std::size_t i = 0; i < slot_count; ++i) {
+        const float start_angle = (-kPi * 0.5f) + (step * static_cast<float>(i)) + segment_gap_radians;
+        const float end_angle = (-kPi * 0.5f) + (step * static_cast<float>(i + 1)) - segment_gap_radians;
+        const float mid_angle = (start_angle + end_angle) * 0.5f;
+        const ImVec2 icon_center = PolarPoint(layout.center, mid_angle, icon_radius);
+        DrawSlotIcon(draw_list, icon_center, i < icon_textures.size() ? icon_textures[i] : empty_icon,
+            layout.config->icon_color,
+            layout.icon_size, layout.ui_scale, layout.opacity);
     }
 }
 
 void DrawCenterPanel(ImDrawList* draw_list, const RadialLayout& layout)
 {
-    draw_list->AddCircleFilled(layout.center, layout.center_panel_radius + (14.0f * layout.ui_scale), IM_COL32(8, 8, 8, 190), 56);
-    draw_list->AddCircleFilled(layout.center, layout.center_panel_radius, IM_COL32(18, 17, 15, 224), 56);
-    draw_list->AddCircle(layout.center, layout.center_panel_radius + (14.0f * layout.ui_scale), IM_COL32(136, 115, 78, 180), 56, 1.5f * layout.ui_scale);
-    draw_list->AddCircle(layout.center, layout.center_panel_radius, IM_COL32(176, 151, 106, 190), 56, 1.5f * layout.ui_scale);
-    draw_list->AddCircle(layout.center, layout.center_panel_radius - (12.0f * layout.ui_scale), IM_COL32(94, 79, 54, 120), 56, 1.0f * layout.ui_scale);
+    const radial_config::RadialConfig& config = *layout.config;
+    draw_list->AddCircleFilled(layout.center, layout.center_panel_radius,
+        ColorWithOpacity(config.background_color, layout.opacity), 56);
+    draw_list->AddCircle(layout.center, layout.center_panel_radius,
+        ColorWithOpacity(config.accent_color, layout.opacity), 56, 1.0f * layout.ui_scale);
 }
 
 void DrawSelectedDetails(ImDrawList* draw_list, ImFont* font, float base_font_size, const RadialLayout& layout,
     const std::vector<RadialSlot>& slots, const char* title, int selected_slot)
 {
-    AddCenteredText(draw_list, font, base_font_size * 0.94f * layout.ui_scale, layout.center, layout.center.y - (48.0f * layout.ui_scale), IM_COL32(219, 206, 174, 220), title);
+    const radial_config::RadialConfig& config = *layout.config;
+    AddCenteredText(draw_list, font, base_font_size * 0.94f * layout.ui_scale, layout.center,
+        layout.center.y - (48.0f * layout.ui_scale), ColorWithOpacity(config.text_color, layout.opacity, 0.86f), title);
     if (selected_slot < 0 || selected_slot >= static_cast<int>(slots.size())) return;
 
     const RadialSlot& slot = slots[static_cast<std::size_t>(selected_slot)];
-    AddCenteredText(draw_list, font, base_font_size * 0.84f * layout.ui_scale, layout.center, layout.center.y - (28.0f * layout.ui_scale), GetCategoryColor(slot, true), GetCategoryLabel(slot));
+    AddCenteredText(draw_list, font, base_font_size * 0.84f * layout.ui_scale, layout.center,
+        layout.center.y - (28.0f * layout.ui_scale),
+        ColorWithOpacity(GetCategoryColor(slot, config), layout.opacity),
+        GetCategoryLabel(slot));
 
     const float font_size = base_font_size * 0.96f * layout.ui_scale;
     const float wrap_width = layout.center_panel_radius * 1.52f;
@@ -300,7 +396,8 @@ void DrawSelectedDetails(ImDrawList* draw_list, ImFont* font, float base_font_si
     float line_y = layout.center.y + (14.0f * layout.ui_scale);
     if (label_lines.size() > 1) line_y -= (line_height * 0.35f);
     for (const std::string& line : label_lines) {
-        AddCenteredText(draw_list, font, font_size, layout.center, line_y, IM_COL32(244, 238, 223, 255), line.c_str());
+        AddCenteredText(draw_list, font, font_size, layout.center, line_y,
+            ColorWithOpacity(config.text_color, layout.opacity), line.c_str());
         line_y += line_height;
     }
 }
@@ -318,11 +415,16 @@ void DrawMenuContents(const std::vector<RadialSlot>& slots, const char* title, c
     const float base_font_size = ImGui::GetFontSize();
 
     DrawBackdrop(draw_list, layout);
-    DrawWheel(draw_list, layout, slots, selected_slot, icon_textures);
-    DrawCenterPanel(draw_list, layout);
-    DrawSelectedDetails(draw_list, font, base_font_size, layout, slots, title, selected_slot);
-    AddCenteredText(draw_list, font, base_font_size * 0.84f * layout.ui_scale, layout.center,
-        layout.center.y + layout.wheel_outer_radius + (28.0f * layout.ui_scale), IM_COL32(220, 213, 197, 220), controls);
+    DrawWheel(draw_list, layout, slots, selected_slot);
+    if (layout.show_center_panel) DrawCenterPanel(draw_list, layout);
+    DrawWheelCenterRims(draw_list, layout);
+    DrawWheelIcons(draw_list, layout, slots.size(), icon_textures);
+    if (layout.show_center_panel) DrawSelectedDetails(draw_list, font, base_font_size, layout, slots, title, selected_slot);
+    if (layout.show_controls) {
+        AddCenteredText(draw_list, font, base_font_size * 0.84f * layout.ui_scale, layout.center,
+            layout.center.y + layout.wheel_outer_radius + (28.0f * layout.ui_scale),
+            ColorWithOpacity(layout.config->text_color, layout.opacity, 0.86f), controls);
+    }
 
     ImGui::End();
 }

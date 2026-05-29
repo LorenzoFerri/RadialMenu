@@ -15,7 +15,7 @@ bash build.sh
 Build output:
 
 ```text
-natives/RadialMenu.dll
+RadialMenu.dll
 ```
 
 ## Testing
@@ -42,6 +42,7 @@ Initialization order:
 
 | File | Responsibility |
 |---|---|
+| `src/config/radial_config.cpp` | Reads and reloads `RadialMenu.ini` from the DLL directory. |
 | `src/core/dllmain.cpp` | Starts one initialization thread and calls `MH_Initialize`, `InitializeRadialSlots`, `asset_reader::Install`, `native_input::Initialize`, and `dx12_hook::Install`. |
 | `src/core/common.h` | Header-only utilities: logging, module info, pattern scanning, RIP-relative resolution, readable-memory checks, COM release helper. |
 | `src/game/equipment/equip_access.cpp` | Resolves `GameDataMan`, equip data, selected slots, and inventory item IDs. |
@@ -88,6 +89,10 @@ Changing radial menu visuals:
 
 `src/render/ui/radial_menu_draw.cpp`
 
+Changing user config:
+
+`src/config/radial_config.cpp`, `RadialMenu.ini`
+
 Changing D3D/ImGui setup:
 
 `src/render/d3d/dx12_hook.cpp`
@@ -124,6 +129,7 @@ Then adjust the font size in `src/render/d3d/dx12_hook.cpp` where `AddFontFromMe
 ## Source Organization
 
 - `src/core`: entrypoint and shared utilities.
+- `src/config`: user config loading and defaults.
 - `src/game/equipment`: equip slots, inventory, spell/quick-item selection.
 - `src/game/messages`: runtime localized names.
 - `src/game/metadata`: spell/item metadata resolution.
@@ -139,10 +145,10 @@ Then adjust the font size in `src/render/d3d/dx12_hook.cpp` where `AddFontFromMe
 
 ## What Not To Do
 
-- Do not add dependencies beyond ImGui and MinHook without strong justification.
+- Do not add dependencies beyond ImGui, MinHook, and mINI without strong justification.
 - Do not change `load_early` to `true`.
-- Do not create external runtime asset files that must be deployed beside the DLL. Embed assets instead.
-- Do not commit `toolchains/`, `build/`, or `natives/*.dll`.
+- Do not create external runtime asset files beyond `RadialMenu.ini` that must be deployed beside the DLL. Embed assets instead.
+- Do not commit `toolchains/`, `build/`, or `RadialMenu.dll`.
 - Do not use destructive git commands unless explicitly requested.
 
 ## Verification Checklist
@@ -151,5 +157,5 @@ After code changes:
 
 1. Run `bash build.sh`.
 2. Run `git diff --check`.
-3. If testing locally with ERR, copy `natives/RadialMenu.dll` to the ERR offline DLL folder.
+3. If testing locally with ERR, copy `RadialMenu.dll` and `RadialMenu.ini` to the ERR offline DLL folder.
 4. In game, verify spell radial, quick-item radial, short D-pad taps, icon loading, and first-open behavior.

@@ -1,5 +1,6 @@
 #include "input/radial_input.h"
 
+#include "config/radial_config.h"
 #include "core/common.h"
 #include "game/input/radial_switch.h"
 #include "game/state/gameplay_state.h"
@@ -80,6 +81,7 @@ int CurrentSelectionFor(RadialKind kind)
 
 bool OpenRadial(RadialHoldState& hold)
 {
+    radial_config::ReloadIfChanged();
     LoadOpenRadialSlots(hold.active_kind);
     if (g_open_radial_slots.empty()) {
         Log("Radial open failed because no slots were available (kind=%s).",

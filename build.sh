@@ -73,7 +73,7 @@ ensure_portable_llvm_mingw() {
 require_cmd cmake
 require_cmd ninja
 
-mkdir -p "${BUILD_DIR}" "${VENDOR_DIR}" "${PROJECT_ROOT}/natives" "${TOOLCHAIN_DIR}"
+mkdir -p "${BUILD_DIR}" "${VENDOR_DIR}" "${TOOLCHAIN_DIR}"
 
 ensure_vendor "ImGui" "${IMGUI_REPO}" "${IMGUI_REF}" "${IMGUI_DIR}" "imgui.cpp"
 ensure_vendor "MinHook" "${MINHOOK_REPO}" "${MINHOOK_REF}" "${MINHOOK_DIR}" "include/MinHook.h"
@@ -93,5 +93,5 @@ cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}" -G Ninja \
 
 cmake --build "${BUILD_DIR}" --config Release
 
-printf '\nBuilt DLL:\n  %s/natives/RadialMenu.dll\n' "${PROJECT_ROOT}"
+printf '\nBuilt DLL:\n  %s/RadialMenu.dll\n' "${PROJECT_ROOT}"
 printf '\nLaunch with me3:\n  me3 launch --profile "%s/RadialMenuProfile.me3"\n' "${PROJECT_ROOT}"

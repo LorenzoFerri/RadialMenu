@@ -1,4 +1,5 @@
 #include "core/common.h"
+#include "config/radial_config.h"
 #include "game/equipment/radial_slots.h"
 #include "game/input/native_input.h"
 #include "input/radial_input.h"
@@ -18,6 +19,7 @@ DWORD WINAPI InitializeRadialMenu(LPVOID)
         return 0;
     }
 
+    radial_menu_mod::radial_config::Load();
     const bool assets = radial_menu_mod::asset_reader::Install();
     const bool radial_slots = radial_menu_mod::InitializeRadialSlots();
     const bool native_input = radial_menu_mod::native_input::Initialize();
