@@ -15,7 +15,7 @@ bash build.sh
 Build output:
 
 ```text
-natives/RadialMenu.dll
+RadialMenu.dll
 ```
 
 ## Testing
@@ -151,5 +151,5 @@ After code changes:
 
 1. Run `bash build.sh`.
 2. Run `git diff --check`.
-3. If testing locally with ERR, copy `natives/RadialMenu.dll` to the ERR offline DLL folder.
+3. If testing locally with ERR, copy `RadialMenu.dll` to the ERR offline DLL folder.
 4. In game, verify spell radial, quick-item radial, short D-pad taps, icon loading, and first-open behavior.

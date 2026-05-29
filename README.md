@@ -110,7 +110,7 @@ bash build.sh
 Build output:
 
 ```text
-natives/RadialMenu.dll
+RadialMenu.dll
 ```
 
 The project cross-compiles a Windows DLL. Do not attempt a native Linux build.

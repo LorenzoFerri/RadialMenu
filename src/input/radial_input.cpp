@@ -3,6 +3,7 @@
 #include "core/common.h"
 #include "game/input/radial_switch.h"
 #include "game/state/gameplay_state.h"
+#include "render/d3d/dx12_hook.h"
 #include "render/ui/radial_menu.h"
 
 #include <windows.h>
@@ -96,6 +97,7 @@ bool OpenRadial(RadialHoldState& hold)
     if (initial_selection < 0) initial_selection = 0;
 
     radial_menu::Open(initial_selection);
+    dx12_hook::TryInstallDeferredOverlayHooks();
     Log("Radial opened (kind=%s slots=%zu initial=%d).",
         hold.active_kind == RadialKind::items ? "items" : "spells",
         g_open_radial_slots.size(),

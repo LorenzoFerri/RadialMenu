@@ -6,6 +6,7 @@
 #include "game/input/radial_camera.h"
 #include "game/state/gameplay_state.h"
 #include "input/radial_input.h"
+#include "render/d3d/dx12_hook.h"
 #include "render/ui/radial_menu.h"
 
 #include <MinHook.h>
@@ -142,6 +143,8 @@ SwitchItemNextFn g_original_switch_item_next = nullptr;
 EquipmentChangeSoundEventFn g_equipment_change_sound_event = nullptr;
 void* g_equipment_change_sound_event_vtable = nullptr;
 bool g_searched_equipment_change_sound_event = false;
+
+void UpdateRadialInputStates();
 
 bool HasExpectedBytes(std::uintptr_t address, const std::uint8_t* expected, std::size_t expected_size)
 {
@@ -281,6 +284,10 @@ void HookedEquipmentHudUpdate(void* hud_context, void* arg2, void* arg3)
         g_spell_hud_visible = spell_visible != 0;
     }
     ApplyPendingSelectionFeedback(reinterpret_cast<std::uintptr_t>(hud_context), hud_state);
+    if (gameplay_state::GetCachedNormalGameplayHudState()) {
+        dx12_hook::TryInstallDeferredOverlayHooks();
+    }
+    UpdateRadialInputStates();
 }
 
 bool HookedSwitchSpellRequestCheck(void* input_state)
@@ -654,7 +661,6 @@ void QueueSelectionFeedback(bool is_item)
 void SampleFrame()
 {
     TryInstallHooks();
-    UpdateRadialInputStates();
 }
 
 bool IsRadialActive()

@@ -86,6 +86,8 @@ static void* g_hook_resize_buffers = nullptr;
 static void* g_hook_resize_buffers1 = nullptr;
 static void* g_hook_set_fullscreen_state = nullptr;
 static void* g_hook_ecl     = nullptr;
+static bool g_overlay_hooks_deferred = false;
+static ULONGLONG g_next_overlay_hook_attempt_ms = 0;
 
 static IDXGISwapChain* g_last_fullscreen_swap_chain = nullptr;
 static BOOL g_last_fullscreen_request = FALSE;
@@ -498,13 +500,8 @@ static void STDMETHODCALLTYPE HookedECL(ID3D12CommandQueue* queue, UINT command_
     g_orig_ecl(queue, command_list_count, lists);
 }
 
-} // namespace
-
-// ── public ────────────────────────────────────────────────────────────────
-bool Install()
+static bool InstallHookTargets(const dx12_vtable::HookTargets& targets)
 {
-    dx12_vtable::HookTargets targets{};
-    if (!dx12_vtable::DiscoverHookTargets(targets)) return false;
     g_hook_present = targets.present;
     g_hook_resize_buffers = targets.resize_buffers;
     g_hook_resize_buffers1 = targets.resize_buffers1;
@@ -534,6 +531,34 @@ bool Install()
     }
     Log("D3D12 hooks installed.");
     return true;
+}
+
+} // namespace
+
+// ── public ────────────────────────────────────────────────────────────────
+bool Install()
+{
+    g_overlay_hooks_deferred = true;
+    Log("D3D12 overlay hook discovery deferred until gameplay.");
+    return true;
+}
+
+bool TryInstallDeferredOverlayHooks()
+{
+    if (!g_overlay_hooks_deferred || g_hook_present) return g_hook_present != nullptr;
+
+    const ULONGLONG now = GetTickCount64();
+    if (g_next_overlay_hook_attempt_ms != 0 && now < g_next_overlay_hook_attempt_ms) return false;
+
+    dx12_vtable::HookTargets targets{};
+    Log("Trying deferred D3D12 overlay hook discovery.");
+    if (!dx12_vtable::DiscoverHookTargets(targets)) {
+        Log("Deferred D3D12 discovery failed; overlay remains disabled.");
+        g_next_overlay_hook_attempt_ms = now + 1000;
+        return false;
+    }
+    g_next_overlay_hook_attempt_ms = 0;
+    return InstallHookTargets(targets);
 }
 
 void Shutdown()
