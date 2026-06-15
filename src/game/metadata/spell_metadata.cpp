@@ -18,6 +18,8 @@ namespace {
 constexpr std::uintptr_t kMagicParamOffset      = 0x478;
 constexpr std::uintptr_t kMagicReqIntOffset     = 0x22;
 constexpr std::uintptr_t kMagicReqFaithOffset   = 0x23;
+// SoloParamRepository holder index 3 (EquipParamGoods), first res-cap pointer.
+constexpr std::uintptr_t kGoodsParamOffset      = 0x160;
 constexpr std::uintptr_t kGoodsIconIdOffset     = 0x30;
 constexpr std::uintptr_t kGoodsTypeOffset       = 0x3E;
 constexpr std::uint8_t   kGoodsTypeSorcery = 5;
@@ -27,8 +29,6 @@ constexpr std::uint8_t   kGoodsTypeSpellBuff = 18;
 
 std::mutex g_cache_mutex;
 std::unordered_map<std::uint32_t, ResolvedSpellMetadata> g_metadata_cache;
-std::uintptr_t g_goods_param_offset = 0;
-bool g_logged_goods_fallback = false;
 ULONGLONG g_last_slow_spell_metadata_log_ms = 0;
 
 void LogSlowSpellMetadata(std::uint32_t spell_id, ULONGLONG start_ms, const ResolvedSpellMetadata& metadata)
@@ -45,42 +45,16 @@ void LogSlowSpellMetadata(std::uint32_t spell_id, ULONGLONG start_ms, const Reso
         metadata.icon_id);
 }
 
-std::uintptr_t LocateEquipParamGoodsOffset(std::uintptr_t repo)
-{
-    if (g_goods_param_offset) return g_goods_param_offset;
-
-    g_goods_param_offset = param_repository::LocateParamOffsetByType(repo, "EQUIP_PARAM_GOODS_ST", kMagicParamOffset);
-    return g_goods_param_offset;
-}
-
 std::uint32_t ReadGoodsIconId(std::uintptr_t repo, std::uint32_t spell_id)
 {
-    std::uintptr_t offset = LocateEquipParamGoodsOffset(repo);
-    if (!offset) {
-        for (std::uintptr_t candidate = 0; candidate < 0x1000; candidate += sizeof(void*)) {
-            if (candidate == kMagicParamOffset) continue;
-            const std::uint8_t* row = param_repository::FindRowData(repo, candidate, spell_id);
-            if (!row) continue;
-
-            const std::uint8_t goods_type = row[kGoodsTypeOffset];
-            if (goods_type != kGoodsTypeSorcery &&
-                goods_type != kGoodsTypeIncantation &&
-                goods_type != kGoodsTypeSpellTool &&
-                goods_type != kGoodsTypeSpellBuff) continue;
-
-            const auto icon_id = *reinterpret_cast<const std::uint16_t*>(row + kGoodsIconIdOffset);
-            if (icon_id == 0) continue;
-
-            offset = candidate;
-            g_goods_param_offset = candidate;
-            g_logged_goods_fallback = true;
-            break;
-        }
-    }
-    if (!offset) return 0;
-
-    const std::uint8_t* data = param_repository::FindRowData(repo, offset, spell_id);
+    const std::uint8_t* data = param_repository::FindRowData(repo, kGoodsParamOffset, spell_id);
     if (!data) return 0;
+
+    const std::uint8_t goods_type = data[kGoodsTypeOffset];
+    if (goods_type != kGoodsTypeSorcery &&
+        goods_type != kGoodsTypeIncantation &&
+        goods_type != kGoodsTypeSpellTool &&
+        goods_type != kGoodsTypeSpellBuff) return 0;
 
     const auto icon_id = *reinterpret_cast<const std::uint16_t*>(data + kGoodsIconIdOffset);
     return icon_id != 0 ? static_cast<std::uint32_t>(icon_id) : 0;

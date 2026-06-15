@@ -61,6 +61,9 @@ static bool                        g_logged_icon_vfs_unavailable = false;
 static ULONGLONG                   g_next_icon_init_attempt_ms = 0;
 static bool                        g_refreshed_open_icon_atlases = false;
 static bool                        g_refreshed_editor_icon_atlases = false;
+static bool                        g_background_spell_icon_atlases_ready = false;
+static bool                        g_background_item_icon_atlases_ready = false;
+static ULONGLONG                   g_next_background_icon_preload_ms = 0;
 static ULONGLONG                   g_last_slow_asset_install_log_ms = 0;
 static ULONGLONG                   g_last_slow_gameplay_state_log_ms = 0;
 static ULONGLONG                   g_last_slow_native_input_log_ms = 0;
@@ -345,6 +348,29 @@ static bool RefreshRequiredIconAtlasesForSlots(const std::vector<RadialSlot>& sl
     return complete;
 }
 
+static void PreloadIconAtlasesWhileClosed()
+{
+    if (!g_icons_ready || radial_menu::IsOpen() || config_editor::IsOpen()) return;
+    if (g_gameplay_ready_frame_count < 120) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (g_next_background_icon_preload_ms != 0 && now < g_next_background_icon_preload_ms) return;
+
+    if (!g_background_spell_icon_atlases_ready) {
+        g_background_spell_icon_atlases_ready = RefreshRequiredIconAtlasesForSlots(GetMemorizedSpells());
+        g_next_background_icon_preload_ms = now + 250;
+        return;
+    }
+
+    if (!g_background_item_icon_atlases_ready) {
+        g_background_item_icon_atlases_ready = RefreshRequiredIconAtlasesForSlots(GetQuickItems());
+        g_next_background_icon_preload_ms = now + 250;
+        return;
+    }
+
+    g_next_background_icon_preload_ms = now + 2000;
+}
+
 static void WaitForQueueIdle()
 {
     if (!g_device || !g_queue) return;
@@ -413,6 +439,9 @@ static void ReleaseOverlayResources(const char* reason)
     g_next_icon_init_attempt_ms = 0;
     g_refreshed_open_icon_atlases = false;
     g_refreshed_editor_icon_atlases = false;
+    g_background_spell_icon_atlases_ready = false;
+    g_background_item_icon_atlases_ready = false;
+    g_next_background_icon_preload_ms = 0;
     g_gameplay_ready_last_frame = false;
     g_gameplay_ready_frame_count = 0;
     g_invalidate_slots_after_gameplay_return = false;
@@ -602,7 +631,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
     const bool gameplay_ready = gameplay_state::RefreshNormalGameplayHudState();
     const bool entered_gameplay = !g_gameplay_ready_last_frame && gameplay_ready;
     const bool left_gameplay = g_gameplay_ready_last_frame && !gameplay_ready;
-    g_gameplay_ready_frame_count = gameplay_ready ? std::min<UINT>(g_gameplay_ready_frame_count + 1, 60) : 0;
+    g_gameplay_ready_frame_count = gameplay_ready ? std::min<UINT>(g_gameplay_ready_frame_count + 1, 180) : 0;
     LogSlowDuration("gameplay_state::RefreshNormalGameplayHudState", section_start, 4, g_last_slow_gameplay_state_log_ms);
 
     if (!kDisableNativeInputForDiagnosticBuild && (gameplay_ready || left_gameplay)) {
@@ -616,6 +645,9 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
 
     if (left_gameplay) {
         g_invalidate_slots_after_gameplay_return = true;
+        g_background_spell_icon_atlases_ready = false;
+        g_background_item_icon_atlases_ready = false;
+        g_next_background_icon_preload_ms = 0;
     }
 
     if (gameplay_ready) {
@@ -637,6 +669,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
         if (g_icons_ready && !radial_open && !editor_open && g_gameplay_ready_frame_count > 1) {
             g_refreshed_open_icon_atlases = false;
             g_refreshed_editor_icon_atlases = false;
+            PreloadIconAtlasesWhileClosed();
         }
     }
 
