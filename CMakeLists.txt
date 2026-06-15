@@ -85,6 +85,8 @@ set(RSM_RENDER_SOURCES
     src/render/ui/radial_menu_draw.h
     src/render/vfs/asset_reader.cpp
     src/render/vfs/asset_reader.h
+    src/render/vfs/data0_archive.cpp
+    src/render/vfs/data0_archive.h
     src/render/vfs/game_vfs.cpp
     src/render/vfs/game_vfs.h
     src/render/vfs/path_utils.cpp

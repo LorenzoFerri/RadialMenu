@@ -1,6 +1,7 @@
 #include "render/vfs/asset_reader.h"
 
 #include "core/common.h"
+#include "render/vfs/data0_archive.h"
 #include "render/vfs/game_vfs.h"
 #include "render/vfs/path_utils.h"
 #include <MinHook.h>
@@ -204,6 +205,15 @@ bool ReadFromMemorySystemRoot(const wchar_t* path, std::vector<std::uint8_t>& by
             g_logged_system_root_read = true;
             return true;
         }
+    }
+    return false;
+}
+
+bool ReadFromData0Archive(const wchar_t* path, std::vector<std::uint8_t>& bytes, std::uint64_t max_size)
+{
+    for (const VirtualRootPath& root : g_virtual_roots) {
+        if (CanonicalVirtualRoot(root.root) != L"system") continue;
+        if (data0_archive::ReadFile(root.expanded, path, bytes, max_size)) return true;
     }
     return false;
 }
@@ -480,6 +490,7 @@ bool ReadFile(const wchar_t* path, std::vector<std::uint8_t>& bytes, std::uint64
     if (ReadFromMemorySystemRoot(path, bytes, max_size)) return true;
     if (ReadThroughLoaderFilesystem(path, bytes, max_size)) return true;
     if (ReadFileFromMountedVfs(path, bytes, max_size)) return true;
+    if (ReadFromData0Archive(path, bytes, max_size)) return true;
     if (!AllowsDirectRead(path)) return false;
     if (ReadFileDirect(path, bytes, max_size)) return true;
 
@@ -563,6 +574,7 @@ void Shutdown()
     g_pending_reads.clear();
     g_cached_files.clear();
     g_virtual_roots.clear();
+    data0_archive::Reset();
 }
 
 }  // namespace radial_menu_mod::asset_reader

@@ -18,8 +18,10 @@
 #include <backends/imgui_impl_dx12.h>
 #include <backends/imgui_impl_win32.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -57,7 +59,10 @@ static UINT                        g_gameplay_ready_frame_count = 0;
 static bool                        g_invalidate_slots_after_gameplay_return = false;
 static bool                        g_logged_icon_vfs_unavailable = false;
 static ULONGLONG                   g_next_icon_init_attempt_ms = 0;
+static ULONGLONG                   g_next_background_icon_preload_ms = 0;
 static bool                        g_refreshed_open_icon_atlases = false;
+static bool                        g_background_icons_complete = false;
+static std::vector<std::uint32_t>  g_background_icon_ids;
 static ULONGLONG                   g_last_slow_asset_install_log_ms = 0;
 static ULONGLONG                   g_last_slow_gameplay_state_log_ms = 0;
 static ULONGLONG                   g_last_slow_native_input_log_ms = 0;
@@ -129,6 +134,39 @@ static void SrvAlloc(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
 static void SrvFree(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE,
                     D3D12_GPU_DESCRIPTOR_HANDLE) {}
 
+static void AddOverlayFonts(ImGuiIO& io)
+{
+    ImFont* base_font = io.Fonts->AddFontFromMemoryCompressedTTF(
+        EldenRingFont_compressed_data,
+        static_cast<int>(EldenRingFont_compressed_size),
+        20.0f);
+    if (!base_font) return;
+
+    wchar_t windows_directory[MAX_PATH] = {};
+    if (!GetWindowsDirectoryW(windows_directory, MAX_PATH)) return;
+
+    const std::wstring font_path = std::wstring(windows_directory) + L"\\Fonts\\msyh.ttc";
+    const int utf8_size = WideCharToMultiByte(CP_UTF8, 0, font_path.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (utf8_size <= 1) return;
+
+    std::string utf8_path(static_cast<std::size_t>(utf8_size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, font_path.c_str(), -1, utf8_path.data(), utf8_size, nullptr, nullptr);
+
+    ImFontConfig config{};
+    config.MergeMode = true;
+    config.FontNo = 0;
+    config.GlyphMinAdvanceX = 10.0f;
+    if (io.Fonts->AddFontFromFileTTF(
+            utf8_path.c_str(),
+            20.0f,
+            &config,
+            io.Fonts->GetGlyphRangesChineseFull())) {
+        Log("Loaded Chinese glyph fallback from Microsoft YaHei.");
+    } else {
+        Log("Chinese glyph fallback unavailable; localized names may not render.");
+    }
+}
+
 static bool TryInitializeIcons()
 {
     if (g_icons_ready) return true;
@@ -167,6 +205,37 @@ static bool RefreshRequiredIconAtlasesForSlots(const std::vector<RadialSlot>& sl
     const bool complete = icon_loader::PreloadIcons(icon_ids, 1);
     LogSlowDuration("RefreshRequiredIconAtlasesForOpenSlots", start, 16, g_last_slow_icon_refresh_log_ms);
     return complete;
+}
+
+static void PreloadKnownIconAtlases()
+{
+    if (!g_icons_ready || radial_menu::IsOpen()) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (g_next_background_icon_preload_ms != 0 && now < g_next_background_icon_preload_ms) return;
+
+    const auto spells = GetMemorizedSpells();
+    const auto items = GetQuickItems();
+    std::vector<std::uint32_t> icon_ids;
+    icon_ids.reserve(spells.size() + items.size());
+    for (const RadialSlot& slot : spells) {
+        if (slot.icon_id != 0) icon_ids.push_back(slot.icon_id);
+    }
+    for (const RadialSlot& slot : items) {
+        if (slot.icon_id != 0) icon_ids.push_back(slot.icon_id);
+    }
+    std::sort(icon_ids.begin(), icon_ids.end());
+    icon_ids.erase(std::unique(icon_ids.begin(), icon_ids.end()), icon_ids.end());
+
+    if (icon_ids != g_background_icon_ids) {
+        g_background_icon_ids = icon_ids;
+        g_background_icons_complete = false;
+    }
+
+    if (!g_background_icons_complete && !g_background_icon_ids.empty()) {
+        g_background_icons_complete = icon_loader::PreloadIcons(g_background_icon_ids, 1);
+    }
+    g_next_background_icon_preload_ms = now + (g_background_icons_complete ? 2000 : 500);
 }
 
 static void WaitForQueueIdle()
@@ -235,7 +304,10 @@ static void ReleaseOverlayResources(const char* reason)
     g_buf_count = 0;
     g_rtv_stride = 0;
     g_next_icon_init_attempt_ms = 0;
+    g_next_background_icon_preload_ms = 0;
     g_refreshed_open_icon_atlases = false;
+    g_background_icons_complete = false;
+    g_background_icon_ids.clear();
     g_gameplay_ready_last_frame = false;
     g_gameplay_ready_frame_count = 0;
     g_invalidate_slots_after_gameplay_return = false;
@@ -313,10 +385,7 @@ static void Init(IDXGISwapChain3* swap_chain)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
-    io.Fonts->AddFontFromMemoryCompressedTTF(
-        EldenRingFont_compressed_data,
-        (int)EldenRingFont_compressed_size,
-        20.0f);
+    AddOverlayFonts(io);
     ImGui_ImplWin32_Init(g_hwnd);
 
     ImGui_ImplDX12_InitInfo info{};
@@ -438,6 +507,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
         }
         if (g_icons_ready && !radial_open && g_gameplay_ready_frame_count > 1) {
             g_refreshed_open_icon_atlases = false;
+            PreloadKnownIconAtlases();
         }
     }
 

@@ -19,6 +19,7 @@ enum class RadialKind {
 struct RadialHoldState {
     bool hold_down = false;
     bool radial_opened = false;
+    bool blocked_until_release = false;
     RadialKind active_kind = RadialKind::none;
 };
 
@@ -55,6 +56,7 @@ void ResetHoldState(RadialHoldState& hold)
 {
     hold.hold_down = false;
     hold.radial_opened = false;
+    hold.blocked_until_release = false;
     hold.active_kind = RadialKind::none;
 }
 
@@ -85,7 +87,7 @@ bool OpenRadial(RadialHoldState& hold)
         Log("Radial open failed because no slots were available (kind=%s).",
             hold.active_kind == RadialKind::items ? "items" : "spells");
         g_open_kind = RadialKind::none;
-        ResetHoldState(hold);
+        hold.blocked_until_release = true;
         return false;
     }
 
@@ -163,6 +165,11 @@ void UpdateRadialHoldState(bool spell_hold_active, bool item_hold_active, float 
         ? pressed_kind == hold.active_kind
         : pressed_kind != RadialKind::none;
     bool checked_gameplay_state = false;
+
+    if (hold.blocked_until_release) {
+        if (pressed_kind == RadialKind::none) ResetHoldState(hold);
+        return;
+    }
 
     if (pressed_kind != RadialKind::none && !hold.hold_down) {
         if (!CanStartRadialInput(pressed_kind)) return;

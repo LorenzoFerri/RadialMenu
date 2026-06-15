@@ -50,6 +50,14 @@ std::string FormatSlotLabel(const RadialSlot& slot)
     return buffer;
 }
 
+void PopBackUtf8(std::string& text)
+{
+    if (text.empty()) return;
+    std::size_t begin = text.size() - 1;
+    while (begin > 0 && (static_cast<unsigned char>(text[begin]) & 0xC0u) == 0x80u) --begin;
+    text.erase(begin);
+}
+
 const char* GetCategoryLabel(const RadialSlot& slot)
 {
     if (slot.is_item) return "ITEM";
@@ -130,7 +138,7 @@ std::vector<std::string> WrapTextLines(ImFont* font, float font_size, const std:
         return font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, value.c_str()).x;
     };
     auto fit_with_ellipsis = [&](std::string value) {
-        while (!value.empty() && measure(value + "...") > wrap_width) value.pop_back();
+        while (!value.empty() && measure(value + "...") > wrap_width) PopBackUtf8(value);
         return value.empty() ? std::string("...") : (value + "...");
     };
 

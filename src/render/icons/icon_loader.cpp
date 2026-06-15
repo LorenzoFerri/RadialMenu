@@ -239,8 +239,8 @@ bool TryInitialize(
         IconSource* source;
     };
     constexpr Candidate candidates[] = {
-        {L"data0:/menu/hi/01_common.tpf.dcx", L"data0:/menu/hi/01_common.sblytbnd.dcx", true, &g_hi_source},
         {L"data0:/menu/low/01_common.tpf.dcx", L"data0:/menu/low/01_common.sblytbnd.dcx", true, &g_low_source},
+        {L"data0:/menu/hi/01_common.tpf.dcx", L"data0:/menu/hi/01_common.sblytbnd.dcx", true, &g_hi_source},
     };
 
     g_logged_begin = true;
@@ -295,6 +295,7 @@ bool TryInitialize(
 
         source.tpf = std::move(tpf);
         if (!selected_label) selected_label = source.label;
+        break;
     }
 
     if (!g_hi_source.saw_assets && !g_low_source.saw_assets) {
