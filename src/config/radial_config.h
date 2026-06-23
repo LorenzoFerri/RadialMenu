@@ -37,6 +37,11 @@ struct RadialConfig {
     bool editor_toggle_shift = true;
     bool editor_toggle_ctrl = false;
     bool editor_toggle_alt = false;
+    float editor_ui_scale = 1.0f;
+
+    bool hdr = false;
+    float hdr_ui_brightness = 200.0f;
+    float hdr_ui_saturation = 1.0f;
 
     Color screen_dim_color = {0, 0, 0, 255};
     Color wheel_background_color = {24, 22, 19, 224};

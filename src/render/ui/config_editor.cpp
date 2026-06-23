@@ -1,6 +1,7 @@
 #include "render/ui/config_editor.h"
 
 #include "config/radial_config.h"
+#include "render/d3d/imgui_hdr_pipeline.h"
 
 #include <windows.h>
 
@@ -50,6 +51,43 @@ bool ColorEdit(const char* label, radial_config::Color& color)
 void MarkEdited()
 {
     if (ImGui::IsItemEdited()) g_saved_message = false;
+}
+
+void DrawRenderSettings(radial_config::RadialConfig& config)
+{
+    if (ImGui::Checkbox("HDR", &config.hdr)) g_saved_message = false;
+    ImGui::BeginDisabled(!config.hdr);
+    ImGui::SliderFloat("UI brightness", &config.hdr_ui_brightness, 50.0f, 2000.0f, "%.0f nits");
+    MarkEdited();
+    ImGui::SliderFloat("UI saturation", &config.hdr_ui_saturation, 0.0f, 2.0f, "%.2f");
+    MarkEdited();
+    ImGui::EndDisabled();
+}
+
+const char* EditorScaleName(float scale)
+{
+    if (scale < 0.875f) return "75%";
+    if (scale < 1.125f) return "100%";
+    if (scale < 1.375f) return "125%";
+    if (scale < 1.625f) return "150%";
+    if (scale < 1.875f) return "175%";
+    return "200%";
+}
+
+void DrawEditorScale(radial_config::RadialConfig& config)
+{
+    constexpr float scales[] = {0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+    if (ImGui::BeginCombo("Settings UI scale", EditorScaleName(config.editor_ui_scale))) {
+        for (float scale : scales) {
+            const bool selected = std::abs(config.editor_ui_scale - scale) < 0.01f;
+            if (ImGui::Selectable(EditorScaleName(scale), selected)) {
+                config.editor_ui_scale = scale;
+                g_saved_message = false;
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
 }
 
 const char* KeyName(int key)
@@ -126,12 +164,17 @@ void Draw()
 
     radial_config::RadialConfig& config = radial_config::Edit();
 
-    ImGui::SetNextWindowSize({520.0f, 680.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({520.0f * config.editor_ui_scale, 680.0f * config.editor_ui_scale},
+        ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Radial Menu Config", &g_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
+    ImGui::SetWindowFontScale(config.editor_ui_scale);
+    imgui_hdr_pipeline::BeginDrawList(
+        ImGui::GetWindowDrawList(), config.hdr, config.hdr_ui_brightness, config.hdr_ui_saturation);
 
+    DrawEditorScale(config);
     ImGui::TextUnformatted("Changes apply live. Use Save to persist them to RadialMenu.ini.");
     if (ImGui::Button("Save to RadialMenu.ini")) {
         g_saved_message = radial_config::Save();
@@ -203,10 +246,15 @@ void Draw()
         ImGui::SliderFloat("Gap##slot", &config.slot_gap_degrees, 0.0f, 30.0f, "%.1f degrees"); MarkEdited();
     }
 
+    if (ImGui::CollapsingHeader("Render")) {
+        DrawRenderSettings(config);
+    }
+
     if (ImGui::CollapsingHeader("Editor Hotkey")) {
         DrawHotkey(config);
     }
 
+    imgui_hdr_pipeline::EndDrawList(ImGui::GetWindowDrawList(), config.hdr);
     ImGui::End();
 }
 

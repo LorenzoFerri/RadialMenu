@@ -1,6 +1,7 @@
 #include "render/ui/radial_menu_draw.h"
 
 #include "config/radial_config.h"
+#include "render/d3d/imgui_hdr_pipeline.h"
 
 #include <algorithm>
 #include <cmath>
@@ -422,6 +423,8 @@ void DrawMenuContents(const std::vector<RadialSlot>& slots, const char* title, c
     BeginOverlayWindow(layout);
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    imgui_hdr_pipeline::BeginDrawList(
+        draw_list, layout.config->hdr, layout.config->hdr_ui_brightness, layout.config->hdr_ui_saturation);
     ImFont* font = ImGui::GetFont();
     const float base_font_size = ImGui::GetFontSize();
 
@@ -439,6 +442,7 @@ void DrawMenuContents(const std::vector<RadialSlot>& slots, const char* title, c
             ColorWithOpacity(layout.config->text_color, layout.opacity, 0.86f), controls);
     }
 
+    imgui_hdr_pipeline::EndDrawList(draw_list, layout.config->hdr);
     ImGui::End();
 }
 

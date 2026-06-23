@@ -6,6 +6,7 @@
 #include "game/state/gameplay_state.h"
 #include "input/radial_input.h"
 #include "render/d3d/dx12_vtable.h"
+#include "render/d3d/imgui_hdr_pipeline.h"
 #include "render/icons/icon_loader.h"
 #include "render/ui/config_editor.h"
 #include "render/vfs/asset_reader.h"
@@ -411,6 +412,7 @@ static void ReleaseOverlayResources(const char* reason)
     }
 
     if (g_ready) {
+        imgui_hdr_pipeline::Shutdown();
         ImGui_ImplDX12_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
@@ -538,6 +540,7 @@ static void Init(IDXGISwapChain3* swap_chain)
     info.SrvDescriptorAllocFn = SrvAlloc;
     info.SrvDescriptorFreeFn  = SrvFree;
     ImGui_ImplDX12_Init(&info);
+    imgui_hdr_pipeline::Initialize(g_device, rtv_format);
 
     g_old_wndproc = (WNDPROC)SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, (LONG_PTR)HookedWndProc);
     g_ready = true;

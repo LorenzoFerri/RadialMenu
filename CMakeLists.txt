@@ -83,6 +83,8 @@ set(RSM_RENDER_SOURCES
     src/render/d3d/dx12_hook.h
     src/render/d3d/dx12_vtable.cpp
     src/render/d3d/dx12_vtable.h
+    src/render/d3d/imgui_hdr_pipeline.cpp
+    src/render/d3d/imgui_hdr_pipeline.h
     src/render/icons/icon_loader.cpp
     src/render/icons/icon_loader.h
     src/render/ui/config_editor.cpp

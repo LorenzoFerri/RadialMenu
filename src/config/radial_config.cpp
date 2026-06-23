@@ -24,6 +24,7 @@ constexpr char kWheelSection[] = "wheel";
 constexpr char kCentralPanelSection[] = "central_panel";
 constexpr char kSlotSection[] = "item_spell_slot";
 constexpr char kEditorSection[] = "editor";
+constexpr char kRenderSection[] = "render";
 
 RadialConfig g_config = {};
 std::wstring g_config_path;
@@ -207,7 +208,7 @@ RadialConfig ReadConfig()
         return config;
     }
     if (!ini.has(kLayoutSection) && !ini.has(kWheelSection) && !ini.has(kCentralPanelSection) &&
-        !ini.has(kSlotSection) && !ini.has(kEditorSection)) {
+        !ini.has(kSlotSection) && !ini.has(kEditorSection) && !ini.has(kRenderSection)) {
         Log("Radial config: no known sections found in RadialMenu.ini; using built-in defaults.");
     }
 
@@ -261,6 +262,14 @@ RadialConfig ReadConfig()
         config.editor_toggle_shift = ReadBool(editor, "toggle_shift", config.editor_toggle_shift);
         config.editor_toggle_ctrl = ReadBool(editor, "toggle_ctrl", config.editor_toggle_ctrl);
         config.editor_toggle_alt = ReadBool(editor, "toggle_alt", config.editor_toggle_alt);
+        config.editor_ui_scale = ReadFloat(editor, "ui_scale", config.editor_ui_scale, 0.75f, 2.0f);
+    }
+
+    if (ini.has(kRenderSection)) {
+        const mINI::INIMap<std::string> render = ini.get(kRenderSection);
+        config.hdr = ReadBool(render, "hdr", config.hdr);
+        config.hdr_ui_brightness = ReadFloat(render, "hdr_ui_brightness", config.hdr_ui_brightness, 50.0f, 2000.0f);
+        config.hdr_ui_saturation = ReadFloat(render, "hdr_ui_saturation", config.hdr_ui_saturation, 0.0f, 2.0f);
     }
 
     if (config.wheel_inner_radius >= config.wheel_outer_radius) {
@@ -274,7 +283,7 @@ RadialConfig ReadConfig()
 
 void LogConfigSummary()
 {
-    Log("Radial config loaded: scale=%.2f center=(%.2f, %.2f) offset=(%.0f, %.0f) wheel=(%.0f, %.0f hidden=%d) center=(%.0f hidden=%d) slot=(%.0f, %.0f gap=%.1f details=%d).",
+    Log("Radial config loaded: scale=%.2f center=(%.2f, %.2f) offset=(%.0f, %.0f) wheel=(%.0f, %.0f hidden=%d) center=(%.0f hidden=%d) slot=(%.0f, %.0f gap=%.1f details=%d) editor_ui_scale=%.2f hdr=%d hdr_ui_brightness=%.0f hdr_ui_saturation=%.2f.",
         g_config.scale,
         g_config.center_x,
         g_config.center_y,
@@ -288,7 +297,11 @@ void LogConfigSummary()
         g_config.slot_inner_radius,
         g_config.slot_outer_radius,
         g_config.slot_gap_degrees,
-        static_cast<int>(g_config.slot_details));
+        static_cast<int>(g_config.slot_details),
+        g_config.editor_ui_scale,
+        static_cast<int>(g_config.hdr),
+        g_config.hdr_ui_brightness,
+        g_config.hdr_ui_saturation);
 }
 
 void LoadFromDisk()
@@ -339,6 +352,12 @@ void WriteConfigToIni(mINI::INIStructure& ini, const RadialConfig& config)
     editor["toggle_shift"] = FormatBool(config.editor_toggle_shift);
     editor["toggle_ctrl"] = FormatBool(config.editor_toggle_ctrl);
     editor["toggle_alt"] = FormatBool(config.editor_toggle_alt);
+    editor["ui_scale"] = FormatFloat(config.editor_ui_scale, 2);
+
+    auto& render = ini[kRenderSection];
+    render["hdr"] = FormatBool(config.hdr);
+    render["hdr_ui_brightness"] = FormatFloat(config.hdr_ui_brightness, 0);
+    render["hdr_ui_saturation"] = FormatFloat(config.hdr_ui_saturation, 2);
 }
 
 }  // namespace
