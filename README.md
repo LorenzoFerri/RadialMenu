@@ -60,11 +60,7 @@ To add the DLL to an existing ModEngine 3 profile, place `RadialMenu.dll` where 
 ```toml
 [[natives]]
 path = 'RadialMenu.dll'
-optional = false
-load_early = false
 ```
-
-`load_early = false` is required. The mod discovers D3D12 hook targets by creating a dummy swap chain after the game renderer is already initialized. Loading early can deadlock with the game's own renderer startup.
 
 ## Logs
 
@@ -192,4 +188,3 @@ Metadata is resolved from runtime game systems instead of static data files. Nam
 
 - The mod is intended for offline play with EAC disabled.
 - `toolchains/`, `build/`, and the built `RadialMenu.dll` are build artifacts and are gitignored.
-- The included profile uses a separate savefile name. If you merge this DLL into another profile, review the profile-level savefile settings for your setup.

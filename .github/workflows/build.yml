@@ -35,7 +35,8 @@ jobs:
       - name: Package release zip
         run: |
           mkdir -p dist/RadialMenu
-          cp natives/RadialMenu.dll dist/RadialMenu/
+          cp RadialMenu.dll dist/RadialMenu/
+          cp RadialMenu.ini dist/RadialMenu/
           cp RadialMenuProfile.me3 dist/RadialMenu/
           cd dist
           zip -r RadialMenu.zip RadialMenu
