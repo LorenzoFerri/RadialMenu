@@ -16,17 +16,17 @@
 namespace radial_menu_mod::radial_switch {
 namespace {
 
-constexpr std::uintptr_t kEquipmentHudUpdateRva = 0x7756B0;
-constexpr std::uintptr_t kSwitchItemRequestCheckRva = 0x758260;
-constexpr std::uintptr_t kSwitchSpellRequestCheckRva = 0x7582D0;
-constexpr std::uintptr_t kSwitchSpellHoldCheckRva = 0x758420;
-constexpr std::uintptr_t kSwitchItemRepeatCheckRva = 0x758580;
-constexpr std::uintptr_t kSwitchSpellRepeatCheckRva = 0x758830;
+constexpr std::uintptr_t kEquipmentHudUpdateRva = 0x776530;
+constexpr std::uintptr_t kSwitchItemRequestCheckRva = 0x7590B0;
+constexpr std::uintptr_t kSwitchSpellRequestCheckRva = 0x759120;
+constexpr std::uintptr_t kSwitchSpellHoldCheckRva = 0x759270;
+constexpr std::uintptr_t kSwitchItemRepeatCheckRva = 0x7593D0;
+constexpr std::uintptr_t kSwitchSpellRepeatCheckRva = 0x759680;
 constexpr std::uintptr_t kCanSwitchSpellRva = 0x2507A0;
 constexpr std::uintptr_t kSwitchItemNextRva = 0x24FE20;
 constexpr std::uintptr_t kSwitchSpellNextRva = 0x250DB0;
-constexpr std::uintptr_t kEquipmentChangeSoundEventRva = 0x814ED0;
-constexpr std::uintptr_t kEquipmentChangeSoundEventVtableRva = 0x2A9DBD0;
+constexpr std::uintptr_t kEquipmentChangeSoundEventRva = 0x815D50;
+constexpr std::uintptr_t kEquipmentChangeSoundEventVtableRva = 0x2A9EDD0;
 
 constexpr std::uint8_t kEquipmentHudUpdatePrefix[] = {
     0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x56, 0x57

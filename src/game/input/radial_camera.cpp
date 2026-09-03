@@ -10,7 +10,7 @@
 namespace radial_menu_mod::radial_camera {
 namespace {
 
-constexpr std::uintptr_t kChrCamInputAccelerationUpdateRva = 0x3B1F50;
+constexpr std::uintptr_t kChrCamInputAccelerationUpdateRva = 0x3B1F60;
 constexpr std::uintptr_t kChrCamPadAccelerationOffset = 0x90;
 constexpr std::uintptr_t kChrCamMoveAccelerationOffset = 0xA0;
 constexpr std::uintptr_t kChrCamLockOnInputOffset = 0xB0;
