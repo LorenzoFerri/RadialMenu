@@ -27,4 +27,9 @@ void SampleFrame()
     radial_camera::SampleFrame();
 }
 
+void PrepareGameplayReturn()
+{
+    radial_switch::PrepareGameplayReturn();
+}
+
 }  // namespace radial_menu_mod::native_input

@@ -120,7 +120,7 @@ std::vector<std::size_t> AddLayoutIcons(IconSource& source, const std::vector<ic
         if (std::find(referenced_atlases.begin(), referenced_atlases.end(), atlas_index) == referenced_atlases.end()) {
             referenced_atlases.push_back(atlas_index);
         }
-        source.icons[icon.id] = {atlas_index, icon.rect};
+        source.icons.try_emplace(icon.id, IconEntry{atlas_index, icon.rect});
     }
     return referenced_atlases;
 }

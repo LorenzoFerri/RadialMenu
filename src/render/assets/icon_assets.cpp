@@ -137,7 +137,7 @@ bool ExtractTpfTexture(const std::vector<std::uint8_t>& tpf, const std::string& 
     const std::uint8_t platform = tpf[0x0c];
     const std::uint8_t encoding = tpf[0x0e];
     constexpr std::size_t kPcTextureHeaderSize = 0x14;
-    if (platform != 0 || count > 512 || 0x10ull + count * kPcTextureHeaderSize > tpf.size()) return false;
+    if (platform != 0 || count > (tpf.size() - 0x10) / kPcTextureHeaderSize) return false;
 
     for (std::uint32_t i = 0; i < count; ++i) {
         const std::size_t entry = 0x10ull + i * kPcTextureHeaderSize;

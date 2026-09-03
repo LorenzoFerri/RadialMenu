@@ -79,60 +79,36 @@ CachedReadableRegion g_cached_pad_vtable_region = {};
 CachedInput g_cached_inputs[8] = {};
 
 template <typename T>
+bool ReadGameMemory(std::uintptr_t address, T& value, CachedReadableRegion& region)
+{
+    return ReadCachedMemory(address, value, region);
+}
+
+template <typename T>
 bool ReadGameMemory(std::uintptr_t address, T& value)
 {
-    if (!IsReadableMemory(reinterpret_cast<const void*>(address), sizeof(T))) return false;
-    value = *reinterpret_cast<const T*>(address);
-    return true;
-}
-
-std::uintptr_t TreeMinNode(std::uintptr_t node)
-{
-    TreeNodeHeader header = {};
-    while (ReadGameMemory(node, header)) {
-        TreeNodeHeader left_header = {};
-        if (header.is_nil != 0 || !ReadGameMemory(header.left, left_header) || left_header.is_nil != 0) break;
-        node = header.left;
-    }
-    return node;
-}
-
-std::uintptr_t TreeNextNode(std::uintptr_t node, std::uintptr_t head)
-{
-    TreeNodeHeader header = {};
-    if (!ReadGameMemory(node, header)) return 0;
-
-    TreeNodeHeader right_header = {};
-    if (ReadGameMemory(header.right, right_header) && right_header.is_nil == 0) return TreeMinNode(header.right);
-
-    while (true) {
-        const auto parent = header.parent;
-        if (parent == head) return 0;
-
-        TreeNodeHeader parent_header = {};
-        if (!ReadGameMemory(parent, parent_header)) return 0;
-        if (node != parent_header.right) return parent;
-
-        node = parent;
-        header = parent_header;
-    }
+    CachedReadableRegion region{};
+    return ReadGameMemory(address, value, region);
 }
 
 template <typename T>
 bool FindTreeValue(std::uintptr_t tree, std::int32_t key, T& value)
 {
+    CachedReadableRegion region{};
     TreeHeader tree_header = {};
-    if (!ReadGameMemory(tree, tree_header) || !tree_header.head || tree_header.size > 1024) return false;
+    if (!ReadGameMemory(tree, tree_header, region) || !tree_header.head || tree_header.size > 1024) return false;
 
     TreeNodeHeader head_header = {};
-    if (!ReadGameMemory(tree_header.head, head_header) || !head_header.parent) return false;
+    if (!ReadGameMemory(tree_header.head, head_header, region) || !head_header.parent) return false;
 
-    auto node = TreeMinNode(head_header.parent);
+    auto node = head_header.parent;
     for (std::uintptr_t i = 0; node && node != tree_header.head && i < tree_header.size; ++i) {
+        TreeNodeHeader node_header = {};
         std::int32_t node_key = 0;
-        if (!ReadGameMemory(node + 0x1C, node_key)) return false;
-        if (node_key == key) return ReadGameMemory(node + 0x20, value);
-        node = TreeNextNode(node, tree_header.head);
+        if (!ReadGameMemory(node, node_header, region) || node_header.is_nil != 0 ||
+            !ReadGameMemory(node + 0x1C, node_key, region)) return false;
+        if (node_key == key) return ReadGameMemory(node + 0x20, value, region);
+        node = key < node_key ? node_header.left : node_header.right;
     }
 
     return false;
@@ -140,18 +116,21 @@ bool FindTreeValue(std::uintptr_t tree, std::int32_t key, T& value)
 
 std::uintptr_t FindTreeValueAddress(std::uintptr_t tree, std::int32_t key)
 {
+    CachedReadableRegion region{};
     TreeHeader tree_header = {};
-    if (!ReadGameMemory(tree, tree_header) || !tree_header.head || tree_header.size > 1024) return 0;
+    if (!ReadGameMemory(tree, tree_header, region) || !tree_header.head || tree_header.size > 1024) return 0;
 
     TreeNodeHeader head_header = {};
-    if (!ReadGameMemory(tree_header.head, head_header) || !head_header.parent) return 0;
+    if (!ReadGameMemory(tree_header.head, head_header, region) || !head_header.parent) return 0;
 
-    auto node = TreeMinNode(head_header.parent);
+    auto node = head_header.parent;
     for (std::uintptr_t i = 0; node && node != tree_header.head && i < tree_header.size; ++i) {
+        TreeNodeHeader node_header = {};
         std::int32_t node_key = 0;
-        if (!ReadGameMemory(node + 0x1C, node_key)) return 0;
+        if (!ReadGameMemory(node, node_header, region) || node_header.is_nil != 0 ||
+            !ReadGameMemory(node + 0x1C, node_key, region)) return 0;
         if (node_key == key) return node + 0x20;
-        node = TreeNextNode(node, tree_header.head);
+        node = key < node_key ? node_header.left : node_header.right;
     }
 
     return 0;
@@ -208,6 +187,15 @@ bool ResolveInGamePad(std::uintptr_t& in_game_pad)
     }
 
     return false;
+}
+
+bool FindCurrentInGamePad(std::uintptr_t& in_game_pad)
+{
+    const auto cached = g_cached_in_game_pad;
+    g_cached_in_game_pad = 0;
+    const bool found = ResolveInGamePad(in_game_pad);
+    g_cached_in_game_pad = cached;
+    return found;
 }
 
 bool ReadVirtualDigitalInput(CachedInput& cached, std::int32_t virtual_input_index)
@@ -388,6 +376,57 @@ bool IsInputCached(std::int32_t input)
         if (cached.valid && cached.input == input && cached.pad == pad) return true;
     }
     return false;
+}
+
+void ResetInputStates()
+{
+    for (auto& cached : g_cached_inputs) {
+        cached.last_poll_ms = 0;
+        cached.last_value = false;
+    }
+}
+
+bool RebindCaches()
+{
+    if (!g_cached_in_game_pad) return false;
+
+    std::uintptr_t current_pad = 0;
+    if (!FindCurrentInGamePad(current_pad)) return false;
+
+    std::uintptr_t input_devices = 0;
+    std::uintptr_t key_assign = 0;
+    std::uintptr_t input_type_group_tree = 0;
+    std::uintptr_t input_code_check_tree = 0;
+    std::uintptr_t virtual_input_index_tree = 0;
+    if (!ReadGameMemory(current_pad + kPadPadDeviceOffset, input_devices) || !input_devices ||
+        !ReadGameMemory(current_pad + kPadKeyAssignOffset, key_assign) || !key_assign ||
+        !ReadGameMemory(current_pad + kPadInputTypeGroupOffset, input_type_group_tree) || !input_type_group_tree ||
+        !ReadGameMemory(current_pad + kPadInputCodeCheckOffset, input_code_check_tree) || !input_code_check_tree ||
+        !ReadGameMemory(key_assign + kKeyAssignVirtualInputIndexMapOffset, virtual_input_index_tree) ||
+        !virtual_input_index_tree) {
+        return false;
+    }
+
+    for (auto& cached : g_cached_inputs) {
+        if (!cached.valid) continue;
+        if (input_type_group_tree != cached.input_type_group_tree ||
+            input_code_check_tree != cached.input_code_check_tree ||
+            virtual_input_index_tree != cached.virtual_input_index_tree) {
+            return false;
+        }
+        cached.pad = current_pad;
+        cached.input_devices = input_devices;
+        cached.key_assign = key_assign;
+        cached.allow_polling_region.Reset();
+        cached.input_devices_region.Reset();
+        cached.bitset_region.Reset();
+        cached.bitset_data_region.Reset();
+        cached.last_poll_ms = 0;
+        cached.last_value = false;
+    }
+    g_cached_in_game_pad = current_pad;
+    g_cached_pad_vtable_region.Reset();
+    return true;
 }
 
 void InvalidateCaches()

@@ -21,8 +21,10 @@
 #include <backends/imgui_impl_dx12.h>
 #include <backends/imgui_impl_win32.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -57,14 +59,13 @@ static bool                        g_icons_ready = false;
 static bool                        g_asset_reader_installed = false;
 static bool                        g_gameplay_ready_last_frame = false;
 static UINT                        g_gameplay_ready_frame_count = 0;
-static bool                        g_invalidate_slots_after_gameplay_return = false;
 static bool                        g_logged_icon_vfs_unavailable = false;
 static ULONGLONG                   g_next_icon_init_attempt_ms = 0;
+static ULONGLONG                   g_next_background_icon_preload_ms = 0;
 static bool                        g_refreshed_open_icon_atlases = false;
 static bool                        g_refreshed_editor_icon_atlases = false;
 static bool                        g_background_spell_icon_atlases_ready = false;
 static bool                        g_background_item_icon_atlases_ready = false;
-static ULONGLONG                   g_next_background_icon_preload_ms = 0;
 static ULONGLONG                   g_last_slow_asset_install_log_ms = 0;
 static ULONGLONG                   g_last_slow_gameplay_state_log_ms = 0;
 static ULONGLONG                   g_last_slow_native_input_log_ms = 0;
@@ -310,6 +311,40 @@ static void SrvAlloc(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
 static void SrvFree(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE,
                     D3D12_GPU_DESCRIPTOR_HANDLE) {}
 
+static ImFont* AddOverlayFonts(ImGuiIO& io)
+{
+    ImFont* base_font = io.Fonts->AddFontFromMemoryCompressedTTF(
+        EldenRingFont_compressed_data,
+        static_cast<int>(EldenRingFont_compressed_size),
+        20.0f);
+    if (!base_font) return nullptr;
+
+    wchar_t windows_directory[MAX_PATH] = {};
+    if (!GetWindowsDirectoryW(windows_directory, MAX_PATH)) return base_font;
+
+    const std::wstring font_path = std::wstring(windows_directory) + L"\\Fonts\\msyh.ttc";
+    const int utf8_size = WideCharToMultiByte(CP_UTF8, 0, font_path.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (utf8_size <= 1) return base_font;
+
+    std::string utf8_path(static_cast<std::size_t>(utf8_size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, font_path.c_str(), -1, utf8_path.data(), utf8_size, nullptr, nullptr);
+
+    ImFontConfig config{};
+    config.MergeMode = true;
+    config.FontNo = 0;
+    config.GlyphMinAdvanceX = 10.0f;
+    if (io.Fonts->AddFontFromFileTTF(
+            utf8_path.c_str(),
+            20.0f,
+            &config,
+            io.Fonts->GetGlyphRangesChineseFull())) {
+        Log("Loaded Chinese glyph fallback from Microsoft YaHei.");
+    } else {
+        Log("Chinese glyph fallback unavailable; localized names may not render.");
+    }
+    return base_font;
+}
+
 static bool TryInitializeIcons()
 {
     if (g_icons_ready) return true;
@@ -440,14 +475,13 @@ static void ReleaseOverlayResources(const char* reason)
     g_buf_count = 0;
     g_rtv_stride = 0;
     g_next_icon_init_attempt_ms = 0;
+    g_next_background_icon_preload_ms = 0;
     g_refreshed_open_icon_atlases = false;
     g_refreshed_editor_icon_atlases = false;
     g_background_spell_icon_atlases_ready = false;
     g_background_item_icon_atlases_ready = false;
-    g_next_background_icon_preload_ms = 0;
     g_gameplay_ready_last_frame = false;
     g_gameplay_ready_frame_count = 0;
-    g_invalidate_slots_after_gameplay_return = false;
     g_last_slow_asset_install_log_ms = 0;
     g_last_slow_gameplay_state_log_ms = 0;
     g_last_slow_native_input_log_ms = 0;
@@ -489,7 +523,7 @@ static void Init(IDXGISwapChain3* swap_chain)
     {
         D3D12_DESCRIPTOR_HEAP_DESC heap_desc{};
         heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        heap_desc.NumDescriptors = 48;
+        heap_desc.NumDescriptors = 160;
         heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         if (FAILED(g_device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_srv_heap))))
             { Log("Init: SRV heap failed"); return; }
@@ -526,10 +560,7 @@ static void Init(IDXGISwapChain3* swap_chain)
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     g_editor_font = io.Fonts->AddFontDefault();
-    g_radial_font = io.Fonts->AddFontFromMemoryCompressedTTF(
-        EldenRingFont_compressed_data,
-        (int)EldenRingFont_compressed_size,
-        20.0f);
+    g_radial_font = AddOverlayFonts(io);
     ImGui_ImplWin32_Init(g_hwnd);
 
     ImGui_ImplDX12_InitInfo info{};
@@ -634,11 +665,17 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
     section_start = TimingStart();
     const bool gameplay_ready = gameplay_state::RefreshNormalGameplayHudState();
     const bool entered_gameplay = !g_gameplay_ready_last_frame && gameplay_ready;
-    const bool left_gameplay = g_gameplay_ready_last_frame && !gameplay_ready;
     g_gameplay_ready_frame_count = gameplay_ready ? std::min<UINT>(g_gameplay_ready_frame_count + 1, 180) : 0;
     LogSlowDuration("gameplay_state::RefreshNormalGameplayHudState", section_start, 4, g_last_slow_gameplay_state_log_ms);
 
-    if (!kDisableNativeInputForDiagnosticBuild && (gameplay_ready || left_gameplay)) {
+    if (entered_gameplay) {
+        radial_input::Reset();
+        native_input::PrepareGameplayReturn();
+        g_background_spell_icon_atlases_ready = false;
+        g_background_item_icon_atlases_ready = false;
+        g_next_background_icon_preload_ms = 0;
+    }
+    if (!kDisableNativeInputForDiagnosticBuild && gameplay_ready) {
         section_start = TimingStart();
         native_input::SampleFrame();
         LogSlowDuration("native_input::SampleFrame", section_start, 4, g_last_slow_native_input_log_ms);
@@ -647,18 +684,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
     const bool editor_open = config_editor::IsOpen();
     UpdateEditorCursorState(editor_open);
 
-    if (left_gameplay) {
-        g_invalidate_slots_after_gameplay_return = true;
-        g_background_spell_icon_atlases_ready = false;
-        g_background_item_icon_atlases_ready = false;
-        g_next_background_icon_preload_ms = 0;
-    }
-
     if (gameplay_ready) {
-        if (entered_gameplay && g_invalidate_slots_after_gameplay_return) {
-            InvalidateRadialSlotCaches();
-            g_invalidate_slots_after_gameplay_return = false;
-        }
         if (!g_icons_ready) {
             section_start = TimingStart();
             TryInitializeIcons();

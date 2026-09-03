@@ -8,6 +8,8 @@ bool PollInput(std::int32_t input);
 bool PollInputIfCached(std::int32_t input);
 bool EnsureInputCached(std::int32_t input);
 bool IsInputCached(std::int32_t input);
+void ResetInputStates();
+bool RebindCaches();
 void InvalidateCaches();
 
 }  // namespace radial_menu_mod::in_game_pad

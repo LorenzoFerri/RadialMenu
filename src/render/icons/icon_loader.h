@@ -9,7 +9,7 @@
 
 namespace radial_menu_mod::icon_loader {
 
-constexpr std::size_t kMaxAtlases = 32;
+constexpr std::size_t kMaxAtlases = 128;
 
 bool TryInitialize(
     ID3D12Device* device,

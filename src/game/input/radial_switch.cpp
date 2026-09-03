@@ -666,6 +666,18 @@ void SampleFrame()
     TryInstallHooks();
 }
 
+void PrepareGameplayReturn()
+{
+    ResetCapture(g_spell_capture);
+    ResetCapture(g_item_capture);
+    in_game_pad::ResetInputStates();
+    if (!in_game_pad::RebindCaches()) {
+        g_input_cache_warm_phase = 0;
+        g_input_cache_warmed = false;
+        in_game_pad::InvalidateCaches();
+    }
+}
+
 bool IsRadialActive()
 {
     return IsRadialActiveNow();

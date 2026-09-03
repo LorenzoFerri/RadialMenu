@@ -93,10 +93,20 @@ const std::uint8_t* FindRowData(std::uintptr_t repo, std::uintptr_t param_offset
     if (row_count == 0 || row_count > 10000) return nullptr;
     if (!IsReadableMemory(reinterpret_cast<const void*>(base + kParamRowTableStart), kParamRowStride * row_count)) return nullptr;
 
-    for (std::uint16_t i = 0; i < row_count; ++i) {
+    std::uint16_t first = 0;
+    std::uint16_t last = row_count;
+    while (first < last) {
+        const auto i = static_cast<std::uint16_t>(first + (last - first) / 2);
         const auto desc = base + kParamRowTableStart + kParamRowStride * i;
         const auto current_row_id = *reinterpret_cast<const std::int32_t*>(desc + kRowDescIdOffset);
-        if (current_row_id != static_cast<std::int32_t>(row_id)) continue;
+        if (current_row_id < static_cast<std::int32_t>(row_id)) {
+            first = static_cast<std::uint16_t>(i + 1);
+            continue;
+        }
+        if (current_row_id > static_cast<std::int32_t>(row_id)) {
+            last = i;
+            continue;
+        }
 
         const auto data_offset = *reinterpret_cast<const std::int64_t*>(desc + kRowDescDataOffset);
         const auto data = base + static_cast<std::uintptr_t>(data_offset);

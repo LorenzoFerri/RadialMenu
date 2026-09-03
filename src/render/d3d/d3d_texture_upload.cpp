@@ -73,9 +73,13 @@ bool UploadBc7Texture(
         return false;
     }
 
-    const std::uint64_t row_pitch = ((width + 3ull) / 4ull) * 16ull;
-    const std::uint64_t upload_size = row_pitch * ((height + 3ull) / 4ull);
-    if (kDataOffset + upload_size > dds.size()) {
+    const std::uint64_t source_row_pitch = ((width + 3ull) / 4ull) * 16ull;
+    const std::uint64_t row_count = (height + 3ull) / 4ull;
+    const std::uint64_t row_pitch = (source_row_pitch + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
+        ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    const std::uint64_t source_size = source_row_pitch * row_count;
+    const std::uint64_t upload_size = row_pitch * row_count;
+    if (kDataOffset + source_size > dds.size()) {
         SafeRelease(texture.resource);
         return false;
     }
@@ -100,7 +104,12 @@ bool UploadBc7Texture(
 
     void* mapped = nullptr;
     upload->Map(0, nullptr, &mapped);
-    std::memcpy(mapped, dds.data() + kDataOffset, static_cast<std::size_t>(upload_size));
+    auto* destination = static_cast<std::uint8_t*>(mapped);
+    const std::uint8_t* source = dds.data() + kDataOffset;
+    for (std::uint64_t row = 0; row < row_count; ++row) {
+        std::memcpy(destination + row * row_pitch, source + row * source_row_pitch,
+            static_cast<std::size_t>(source_row_pitch));
+    }
     upload->Unmap(0, nullptr);
 
     ID3D12Fence* fence = nullptr;
