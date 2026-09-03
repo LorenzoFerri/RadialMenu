@@ -45,6 +45,7 @@ The zip contains:
 ```text
 RadialMenu/
   RadialMenu.dll
+  RadialMenu.ini
   RadialMenuProfile.me3
 ```
 
@@ -67,7 +68,7 @@ load_early = false
 
 ## Logs
 
-The mod writes `RadialMenu.log` next to `RadialMenu.dll`.
+The mod reads `RadialMenu.ini` and writes `RadialMenu.log` next to `RadialMenu.dll`.
 
 Useful startup lines include:
 
@@ -94,6 +95,10 @@ Icon loader source read result: source=hi tpf=1 layout=1.
 Icon loader metadata ready ...
 Icon loader initialized.
 ```
+
+## Configuration
+
+Edit `RadialMenu.ini` beside `RadialMenu.dll` to adjust radial size, position, opacity, and optional center-panel visibility. The file is reloaded when a radial menu opens after the file changes.
 
 ## Building
 
@@ -186,5 +191,5 @@ Metadata is resolved from runtime game systems instead of static data files. Nam
 ## Notes
 
 - The mod is intended for offline play with EAC disabled.
-- `toolchains/`, `build/`, and `natives/` are build artifacts and are gitignored.
+- `toolchains/`, `build/`, and the built `RadialMenu.dll` are build artifacts and are gitignored.
 - The included profile uses a separate savefile name. If you merge this DLL into another profile, review the profile-level savefile settings for your setup.

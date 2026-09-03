@@ -1,8 +1,7 @@
 # Build output
 build/
-natives/*.dll
-natives/*.pdb
-/*.dll
+/RadialMenu.dll
+/RadialMenu.pdb
 
 # Bundled binary toolchain and tools (too large for git)
 toolchains/

@@ -112,4 +112,10 @@ void Draw(const std::vector<RadialSlot>& slots, const char* title, const char* c
     DrawMenuContents(slots, title, controls, g_selected_slot, ResolveIconTextures(slots));
 }
 
+void DrawPreview(const std::vector<RadialSlot>& slots, const char* title, const char* controls, int selected_slot)
+{
+    if (slots.empty()) return;
+    DrawMenuContents(slots, title, controls, selected_slot >= 0 ? selected_slot : 0, ResolveIconTextures(slots));
+}
+
 }  // namespace radial_menu_mod::radial_menu

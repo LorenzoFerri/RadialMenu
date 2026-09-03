@@ -1,11 +1,14 @@
 #include "render/d3d/dx12_hook.h"
+#include "config/radial_config.h"
 #include "core/common.h"
 #include "game/equipment/radial_slots.h"
 #include "game/input/native_input.h"
 #include "game/state/gameplay_state.h"
 #include "input/radial_input.h"
 #include "render/d3d/dx12_vtable.h"
+#include "render/d3d/imgui_hdr_pipeline.h"
 #include "render/icons/icon_loader.h"
+#include "render/ui/config_editor.h"
 #include "render/vfs/asset_reader.h"
 #include "render/ui/radial_menu.h"
 #include "render/ui/eldenring_font.h"
@@ -58,6 +61,10 @@ static bool                        g_invalidate_slots_after_gameplay_return = fa
 static bool                        g_logged_icon_vfs_unavailable = false;
 static ULONGLONG                   g_next_icon_init_attempt_ms = 0;
 static bool                        g_refreshed_open_icon_atlases = false;
+static bool                        g_refreshed_editor_icon_atlases = false;
+static bool                        g_background_spell_icon_atlases_ready = false;
+static bool                        g_background_item_icon_atlases_ready = false;
+static ULONGLONG                   g_next_background_icon_preload_ms = 0;
 static ULONGLONG                   g_last_slow_asset_install_log_ms = 0;
 static ULONGLONG                   g_last_slow_gameplay_state_log_ms = 0;
 static ULONGLONG                   g_last_slow_native_input_log_ms = 0;
@@ -67,6 +74,9 @@ static ULONGLONG                   g_last_slow_render_log_ms = 0;
 
 static HWND    g_hwnd        = nullptr;
 static WNDPROC g_old_wndproc = nullptr;
+static ImFont* g_radial_font = nullptr;
+static ImFont* g_editor_font = nullptr;
+static bool g_editor_cursor_released = false;
 
 // ── hook plumbing ─────────────────────────────────────────────────────────
 using PFN_Present = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, UINT, UINT);
@@ -74,12 +84,20 @@ using PFN_ResizeBuffers = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UIN
 using PFN_ResizeBuffers1 = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, UINT, UINT, UINT, DXGI_FORMAT, UINT, const UINT*, IUnknown* const*);
 using PFN_SetFullscreenState = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, BOOL, IDXGIOutput*);
 using PFN_ECL     = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
+using PFN_SetCursorPos = BOOL(WINAPI*)(int, int);
+using PFN_ClipCursor = BOOL(WINAPI*)(const RECT*);
+using PFN_GetRawInputData = UINT(WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
+using PFN_GetRawInputBuffer = UINT(WINAPI*)(PRAWINPUT, PUINT, UINT);
 
 static PFN_Present g_orig_present = nullptr;
 static PFN_ResizeBuffers g_orig_resize_buffers = nullptr;
 static PFN_ResizeBuffers1 g_orig_resize_buffers1 = nullptr;
 static PFN_SetFullscreenState g_orig_set_fullscreen_state = nullptr;
 static PFN_ECL     g_orig_ecl     = nullptr;
+static PFN_SetCursorPos g_orig_set_cursor_pos = nullptr;
+static PFN_ClipCursor g_orig_clip_cursor = nullptr;
+static PFN_GetRawInputData g_orig_get_raw_input_data = nullptr;
+static PFN_GetRawInputBuffer g_orig_get_raw_input_buffer = nullptr;
 
 static void* g_hook_present = nullptr;
 static void* g_hook_resize_buffers = nullptr;
@@ -87,15 +105,176 @@ static void* g_hook_resize_buffers1 = nullptr;
 static void* g_hook_set_fullscreen_state = nullptr;
 static void* g_hook_ecl     = nullptr;
 static bool g_overlay_hooks_deferred = false;
-static ULONGLONG g_next_overlay_hook_attempt_ms = 0;
+static void* g_hook_set_cursor_pos = nullptr;
+static void* g_hook_clip_cursor = nullptr;
+static void* g_hook_get_raw_input_data = nullptr;
+static void* g_hook_get_raw_input_buffer = nullptr;
 
 static IDXGISwapChain* g_last_fullscreen_swap_chain = nullptr;
 static BOOL g_last_fullscreen_request = FALSE;
 static bool g_has_last_fullscreen_request = false;
 
+static bool IsEditorInputMessage(UINT msg)
+{
+    return (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) ||
+        (msg >= WM_KEYFIRST && msg <= WM_KEYLAST) ||
+        msg == WM_CHAR || msg == WM_SYSCHAR || msg == WM_INPUT;
+}
+
+static void SetCursorVisible(bool visible)
+{
+    if (visible) {
+        while (ShowCursor(TRUE) < 0) {}
+    } else {
+        while (ShowCursor(FALSE) >= 0) {}
+    }
+}
+
+static void UpdateEditorCursorState(bool editor_open)
+{
+    if (editor_open) {
+        if (g_orig_clip_cursor) {
+            g_orig_clip_cursor(nullptr);
+        } else {
+            ClipCursor(nullptr);
+        }
+        ReleaseCapture();
+        if (!g_editor_cursor_released) SetCursorVisible(true);
+        g_editor_cursor_released = true;
+        return;
+    }
+
+    if (g_editor_cursor_released) {
+        SetCursorVisible(false);
+        g_editor_cursor_released = false;
+    }
+}
+
+static BOOL WINAPI HookedSetCursorPos(int x, int y)
+{
+    if (config_editor::IsOpen()) return TRUE;
+    return g_orig_set_cursor_pos ? g_orig_set_cursor_pos(x, y) : FALSE;
+}
+
+static BOOL WINAPI HookedClipCursor(const RECT* rect)
+{
+    if (config_editor::IsOpen()) return TRUE;
+    return g_orig_clip_cursor ? g_orig_clip_cursor(rect) : FALSE;
+}
+
+static void ClearRawMouseInput(RAWINPUT& input)
+{
+    if (input.header.dwType != RIM_TYPEMOUSE) return;
+
+    input.data.mouse.usFlags = MOUSE_MOVE_ABSOLUTE;
+    input.data.mouse.usButtonFlags = 0;
+    input.data.mouse.usButtonData = 0;
+    input.data.mouse.ulRawButtons = 0;
+    input.data.mouse.lLastX = 0;
+    input.data.mouse.lLastY = 0;
+    input.data.mouse.ulExtraInformation = 0;
+}
+
+static UINT WINAPI HookedGetRawInputData(HRAWINPUT raw_input, UINT command, LPVOID data, PUINT size,
+    UINT header_size)
+{
+    const UINT result = g_orig_get_raw_input_data ?
+        g_orig_get_raw_input_data(raw_input, command, data, size, header_size) : static_cast<UINT>(-1);
+    if (!config_editor::IsOpen() || command != RID_INPUT || result == static_cast<UINT>(-1) || data == nullptr) {
+        return result;
+    }
+
+    auto* input = reinterpret_cast<RAWINPUT*>(data);
+    ClearRawMouseInput(*input);
+    return result;
+}
+
+static UINT WINAPI HookedGetRawInputBuffer(PRAWINPUT data, PUINT size, UINT header_size)
+{
+    const UINT result = g_orig_get_raw_input_buffer ?
+        g_orig_get_raw_input_buffer(data, size, header_size) : static_cast<UINT>(-1);
+    if (!config_editor::IsOpen() || result == static_cast<UINT>(-1) || data == nullptr) return result;
+
+    RAWINPUT* input = data;
+    for (UINT i = 0; i < result; ++i) {
+        ClearRawMouseInput(*input);
+        const auto next = reinterpret_cast<ULONG_PTR>(input) + input->header.dwSize;
+        input = reinterpret_cast<RAWINPUT*>((next + sizeof(ULONGLONG) - 1) & ~(sizeof(ULONGLONG) - 1));
+    }
+    return result;
+}
+
+static void TryInstallCursorHooks()
+{
+    if (!g_hook_set_cursor_pos) {
+        HMODULE user32 = GetModuleHandleW(L"user32.dll");
+        if (user32) {
+            g_hook_set_cursor_pos = reinterpret_cast<void*>(GetProcAddress(user32, "SetCursorPos"));
+            g_hook_clip_cursor = reinterpret_cast<void*>(GetProcAddress(user32, "ClipCursor"));
+            g_hook_get_raw_input_data = reinterpret_cast<void*>(GetProcAddress(user32, "GetRawInputData"));
+            g_hook_get_raw_input_buffer = reinterpret_cast<void*>(GetProcAddress(user32, "GetRawInputBuffer"));
+        }
+    }
+
+    if (g_hook_set_cursor_pos && !g_orig_set_cursor_pos) {
+        const MH_STATUS create_status = MH_CreateHook(g_hook_set_cursor_pos, reinterpret_cast<void*>(&HookedSetCursorPos),
+            reinterpret_cast<void**>(&g_orig_set_cursor_pos));
+        const MH_STATUS enable_status = create_status == MH_OK ? MH_EnableHook(g_hook_set_cursor_pos) : create_status;
+        if (create_status != MH_OK || enable_status != MH_OK) {
+            Log("SetCursorPos hook failed (create=%d enable=%d).", static_cast<int>(create_status), static_cast<int>(enable_status));
+            g_hook_set_cursor_pos = nullptr;
+        }
+    }
+
+    if (g_hook_clip_cursor && !g_orig_clip_cursor) {
+        const MH_STATUS create_status = MH_CreateHook(g_hook_clip_cursor, reinterpret_cast<void*>(&HookedClipCursor),
+            reinterpret_cast<void**>(&g_orig_clip_cursor));
+        const MH_STATUS enable_status = create_status == MH_OK ? MH_EnableHook(g_hook_clip_cursor) : create_status;
+        if (create_status != MH_OK || enable_status != MH_OK) {
+            Log("ClipCursor hook failed (create=%d enable=%d).", static_cast<int>(create_status), static_cast<int>(enable_status));
+            g_hook_clip_cursor = nullptr;
+        }
+    }
+
+    if (g_hook_get_raw_input_data && !g_orig_get_raw_input_data) {
+        const MH_STATUS create_status = MH_CreateHook(g_hook_get_raw_input_data,
+            reinterpret_cast<void*>(&HookedGetRawInputData), reinterpret_cast<void**>(&g_orig_get_raw_input_data));
+        const MH_STATUS enable_status = create_status == MH_OK ? MH_EnableHook(g_hook_get_raw_input_data) : create_status;
+        if (create_status != MH_OK || enable_status != MH_OK) {
+            Log("GetRawInputData hook failed (create=%d enable=%d).", static_cast<int>(create_status), static_cast<int>(enable_status));
+            g_hook_get_raw_input_data = nullptr;
+        }
+    }
+
+    if (g_hook_get_raw_input_buffer && !g_orig_get_raw_input_buffer) {
+        const MH_STATUS create_status = MH_CreateHook(g_hook_get_raw_input_buffer,
+            reinterpret_cast<void*>(&HookedGetRawInputBuffer), reinterpret_cast<void**>(&g_orig_get_raw_input_buffer));
+        const MH_STATUS enable_status = create_status == MH_OK ? MH_EnableHook(g_hook_get_raw_input_buffer) : create_status;
+        if (create_status != MH_OK || enable_status != MH_OK) {
+            Log("GetRawInputBuffer hook failed (create=%d enable=%d).", static_cast<int>(create_status), static_cast<int>(enable_status));
+            g_hook_get_raw_input_buffer = nullptr;
+        }
+    }
+}
+
 static LRESULT CALLBACK HookedWndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
 {
-    ImGui_ImplWin32_WndProcHandler(hwnd, msg, w, l);
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && ((l & (1u << 30u)) == 0)) {
+        const radial_menu_mod::radial_config::RadialConfig& config = radial_menu_mod::radial_config::Get();
+        const bool shift_down = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        const bool ctrl_down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool alt_down = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+        if (static_cast<int>(w) == config.editor_toggle_key &&
+            (!config.editor_toggle_shift || shift_down) &&
+            (!config.editor_toggle_ctrl || ctrl_down) &&
+            (!config.editor_toggle_alt || alt_down)) {
+            radial_menu_mod::config_editor::Toggle();
+            return 0;
+        }
+    }
+
+    const LRESULT handled_by_imgui = ImGui_ImplWin32_WndProcHandler(hwnd, msg, w, l);
+    if (radial_menu_mod::config_editor::IsOpen() && IsEditorInputMessage(msg)) return handled_by_imgui;
     return CallWindowProcW(g_old_wndproc, hwnd, msg, w, l);
 }
 
@@ -171,6 +350,29 @@ static bool RefreshRequiredIconAtlasesForSlots(const std::vector<RadialSlot>& sl
     return complete;
 }
 
+static void PreloadIconAtlasesWhileClosed()
+{
+    if (!g_icons_ready || radial_menu::IsOpen() || config_editor::IsOpen()) return;
+    if (g_gameplay_ready_frame_count < 120) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (g_next_background_icon_preload_ms != 0 && now < g_next_background_icon_preload_ms) return;
+
+    if (!g_background_spell_icon_atlases_ready) {
+        g_background_spell_icon_atlases_ready = RefreshRequiredIconAtlasesForSlots(GetMemorizedSpells());
+        g_next_background_icon_preload_ms = now + 250;
+        return;
+    }
+
+    if (!g_background_item_icon_atlases_ready) {
+        g_background_item_icon_atlases_ready = RefreshRequiredIconAtlasesForSlots(GetQuickItems());
+        g_next_background_icon_preload_ms = now + 250;
+        return;
+    }
+
+    g_next_background_icon_preload_ms = now + 2000;
+}
+
 static void WaitForQueueIdle()
 {
     if (!g_device || !g_queue) return;
@@ -211,6 +413,7 @@ static void ReleaseOverlayResources(const char* reason)
     }
 
     if (g_ready) {
+        imgui_hdr_pipeline::Shutdown();
         ImGui_ImplDX12_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
@@ -238,6 +441,10 @@ static void ReleaseOverlayResources(const char* reason)
     g_rtv_stride = 0;
     g_next_icon_init_attempt_ms = 0;
     g_refreshed_open_icon_atlases = false;
+    g_refreshed_editor_icon_atlases = false;
+    g_background_spell_icon_atlases_ready = false;
+    g_background_item_icon_atlases_ready = false;
+    g_next_background_icon_preload_ms = 0;
     g_gameplay_ready_last_frame = false;
     g_gameplay_ready_frame_count = 0;
     g_invalidate_slots_after_gameplay_return = false;
@@ -251,6 +458,9 @@ static void ReleaseOverlayResources(const char* reason)
     g_has_last_fullscreen_request = false;
     g_hwnd = nullptr;
     g_old_wndproc = nullptr;
+    g_radial_font = nullptr;
+    g_editor_font = nullptr;
+    g_editor_cursor_released = false;
     Log("Overlay resources released for %s.", reason);
 }
 
@@ -315,7 +525,8 @@ static void Init(IDXGISwapChain3* swap_chain)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
-    io.Fonts->AddFontFromMemoryCompressedTTF(
+    g_editor_font = io.Fonts->AddFontDefault();
+    g_radial_font = io.Fonts->AddFontFromMemoryCompressedTTF(
         EldenRingFont_compressed_data,
         (int)EldenRingFont_compressed_size,
         20.0f);
@@ -330,6 +541,7 @@ static void Init(IDXGISwapChain3* swap_chain)
     info.SrvDescriptorAllocFn = SrvAlloc;
     info.SrvDescriptorFreeFn  = SrvFree;
     ImGui_ImplDX12_Init(&info);
+    imgui_hdr_pipeline::Initialize(g_device, rtv_format);
 
     g_old_wndproc = (WNDPROC)SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, (LONG_PTR)HookedWndProc);
     g_ready = true;
@@ -362,9 +574,21 @@ static void RenderRadialOverlay(IDXGISwapChain3* swap_chain)
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+    const bool editor_open = config_editor::IsOpen();
+    ImGui::GetIO().MouseDrawCursor = editor_open;
 
-    radial_menu::Draw(radial_input::GetOpenRadialSlots(), radial_input::GetOpenMenuTitle(),
-        radial_input::GetOpenMenuControls());
+    if (g_radial_font) ImGui::PushFont(g_radial_font);
+    if (radial_menu::IsOpen()) {
+        radial_menu::Draw(radial_input::GetOpenRadialSlots(), radial_input::GetOpenMenuTitle(),
+            radial_input::GetOpenMenuControls());
+    } else if (editor_open) {
+        radial_menu::DrawPreview(GetMemorizedSpells(), "Quick Spell", "Preview", GetCurrentSpellSlot());
+    }
+    if (g_radial_font) ImGui::PopFont();
+
+    if (g_editor_font) ImGui::PushFont(g_editor_font);
+    config_editor::Draw();
+    if (g_editor_font) ImGui::PopFont();
 
     ImGui::Render();
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_cmdlist);
@@ -411,7 +635,7 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
     const bool gameplay_ready = gameplay_state::RefreshNormalGameplayHudState();
     const bool entered_gameplay = !g_gameplay_ready_last_frame && gameplay_ready;
     const bool left_gameplay = g_gameplay_ready_last_frame && !gameplay_ready;
-    g_gameplay_ready_frame_count = gameplay_ready ? std::min<UINT>(g_gameplay_ready_frame_count + 1, 60) : 0;
+    g_gameplay_ready_frame_count = gameplay_ready ? std::min<UINT>(g_gameplay_ready_frame_count + 1, 180) : 0;
     LogSlowDuration("gameplay_state::RefreshNormalGameplayHudState", section_start, 4, g_last_slow_gameplay_state_log_ms);
 
     if (!kDisableNativeInputForDiagnosticBuild && (gameplay_ready || left_gameplay)) {
@@ -420,9 +644,14 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
         LogSlowDuration("native_input::SampleFrame", section_start, 4, g_last_slow_native_input_log_ms);
     }
     const bool radial_open = radial_menu::IsOpen();
+    const bool editor_open = config_editor::IsOpen();
+    UpdateEditorCursorState(editor_open);
 
     if (left_gameplay) {
         g_invalidate_slots_after_gameplay_return = true;
+        g_background_spell_icon_atlases_ready = false;
+        g_background_item_icon_atlases_ready = false;
+        g_next_background_icon_preload_ms = 0;
     }
 
     if (gameplay_ready) {
@@ -438,12 +667,17 @@ static HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain3* swap_chain, UINT
         if (g_icons_ready && radial_open && !g_refreshed_open_icon_atlases) {
             g_refreshed_open_icon_atlases = RefreshRequiredIconAtlasesForSlots(radial_input::GetOpenRadialSlots());
         }
-        if (g_icons_ready && !radial_open && g_gameplay_ready_frame_count > 1) {
+        if (g_icons_ready && editor_open && !radial_open && !g_refreshed_editor_icon_atlases) {
+            g_refreshed_editor_icon_atlases = RefreshRequiredIconAtlasesForSlots(GetMemorizedSpells());
+        }
+        if (g_icons_ready && !radial_open && !editor_open && g_gameplay_ready_frame_count > 1) {
             g_refreshed_open_icon_atlases = false;
+            g_refreshed_editor_icon_atlases = false;
+            PreloadIconAtlasesWhileClosed();
         }
     }
 
-    if (!radial_open) {
+    if (!radial_open && !editor_open) {
         g_gameplay_ready_last_frame = gameplay_ready;
         return g_orig_present(swap_chain, sync, flags);
     }
@@ -529,6 +763,7 @@ static bool InstallHookTargets(const dx12_vtable::HookTargets& targets)
      || MH_EnableHook(g_hook_ecl) != MH_OK) {
         Log("ECL hook failed"); return false;
     }
+    TryInstallCursorHooks();
     Log("D3D12 hooks installed.");
     return true;
 }
@@ -546,18 +781,14 @@ bool Install()
 bool TryInstallDeferredOverlayHooks()
 {
     if (!g_overlay_hooks_deferred || g_hook_present) return g_hook_present != nullptr;
-
-    const ULONGLONG now = GetTickCount64();
-    if (g_next_overlay_hook_attempt_ms != 0 && now < g_next_overlay_hook_attempt_ms) return false;
+    g_overlay_hooks_deferred = false;
 
     dx12_vtable::HookTargets targets{};
     Log("Trying deferred D3D12 overlay hook discovery.");
     if (!dx12_vtable::DiscoverHookTargets(targets)) {
         Log("Deferred D3D12 discovery failed; overlay remains disabled.");
-        g_next_overlay_hook_attempt_ms = now + 1000;
         return false;
     }
-    g_next_overlay_hook_attempt_ms = 0;
     return InstallHookTargets(targets);
 }
 
@@ -568,6 +799,10 @@ void Shutdown()
     if (g_hook_resize_buffers1) { MH_DisableHook(g_hook_resize_buffers1); MH_RemoveHook(g_hook_resize_buffers1); }
     if (g_hook_set_fullscreen_state) { MH_DisableHook(g_hook_set_fullscreen_state); MH_RemoveHook(g_hook_set_fullscreen_state); }
     if (g_hook_ecl)     { MH_DisableHook(g_hook_ecl);     MH_RemoveHook(g_hook_ecl); }
+    if (g_hook_set_cursor_pos) { MH_DisableHook(g_hook_set_cursor_pos); MH_RemoveHook(g_hook_set_cursor_pos); }
+    if (g_hook_clip_cursor) { MH_DisableHook(g_hook_clip_cursor); MH_RemoveHook(g_hook_clip_cursor); }
+    if (g_hook_get_raw_input_data) { MH_DisableHook(g_hook_get_raw_input_data); MH_RemoveHook(g_hook_get_raw_input_data); }
+    if (g_hook_get_raw_input_buffer) { MH_DisableHook(g_hook_get_raw_input_buffer); MH_RemoveHook(g_hook_get_raw_input_buffer); }
 
     ReleaseOverlayResources("shutdown");
 }

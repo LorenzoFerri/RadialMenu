@@ -13,13 +13,15 @@ endif()
 
 set(IMGUI_ROOT "${CMAKE_SOURCE_DIR}/vendor/imgui")
 set(MINHOOK_ROOT "${CMAKE_SOURCE_DIR}/vendor/minhook")
+set(MINI_ROOT "${CMAKE_SOURCE_DIR}/vendor/mINI")
 
 foreach(required_path
         "${IMGUI_ROOT}/imgui.cpp"
         "${IMGUI_ROOT}/backends/imgui_impl_dx12.cpp"
         "${IMGUI_ROOT}/backends/imgui_impl_win32.cpp"
         "${MINHOOK_ROOT}/include/MinHook.h"
-        "${MINHOOK_ROOT}/src/buffer.c")
+        "${MINHOOK_ROOT}/src/buffer.c"
+        "${MINI_ROOT}/src/mini/ini.h")
     if(NOT EXISTS "${required_path}")
         message(FATAL_ERROR "Missing vendored dependency file: ${required_path}. Run build.sh on Linux or build.ps1 on Windows.")
     endif()
@@ -29,6 +31,11 @@ set(RSM_CORE_SOURCES
     src/core/dllmain.cpp
     src/core/common.h
     src/core/log.cpp
+)
+
+set(RSM_CONFIG_SOURCES
+    src/config/radial_config.cpp
+    src/config/radial_config.h
 )
 
 set(RSM_GAME_SOURCES
@@ -76,8 +83,12 @@ set(RSM_RENDER_SOURCES
     src/render/d3d/dx12_hook.h
     src/render/d3d/dx12_vtable.cpp
     src/render/d3d/dx12_vtable.h
+    src/render/d3d/imgui_hdr_pipeline.cpp
+    src/render/d3d/imgui_hdr_pipeline.h
     src/render/icons/icon_loader.cpp
     src/render/icons/icon_loader.h
+    src/render/ui/config_editor.cpp
+    src/render/ui/config_editor.h
     src/render/ui/eldenring_font.h
     src/render/ui/radial_menu.cpp
     src/render/ui/radial_menu.h
@@ -106,6 +117,7 @@ set(RSM_VENDOR_SOURCES
 
 add_library(RadialMenu SHARED
     ${RSM_CORE_SOURCES}
+    ${RSM_CONFIG_SOURCES}
     ${RSM_GAME_SOURCES}
     ${RSM_INPUT_SOURCES}
     ${RSM_RENDER_SOURCES}
@@ -119,6 +131,7 @@ target_include_directories(RadialMenu PRIVATE
     "${MINHOOK_ROOT}/include"
     "${MINHOOK_ROOT}/src"
     "${MINHOOK_ROOT}/src/hde"
+    "${MINI_ROOT}/src"
 )
 
 target_compile_definitions(RadialMenu PRIVATE

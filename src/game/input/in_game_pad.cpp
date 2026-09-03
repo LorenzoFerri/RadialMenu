@@ -22,7 +22,7 @@ constexpr std::uintptr_t kVirtualMultiDeviceVirtualInputDataOffset = 0x10;
 constexpr std::uintptr_t kVirtualInputDataDigitalBitsetOffset = 0x30;
 constexpr std::uintptr_t kDynamicBitsetIntegerCountOffset = 0x08;
 constexpr std::uintptr_t kDynamicBitsetDataOffset = 0x10;
-constexpr std::uint32_t kInGamePadUserInputVtableRva = 0x2BE0488;
+constexpr std::uint32_t kInGamePadUserInputVtableRva = 0x2BE35E8;
 
 struct TreeHeader {
     std::uintptr_t allocator = 0;

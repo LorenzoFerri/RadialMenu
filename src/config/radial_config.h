@@ -1,0 +1,66 @@
+#pragma once
+
+namespace radial_menu_mod::radial_config {
+
+struct Color {
+    int r = 255;
+    int g = 255;
+    int b = 255;
+    int a = 255;
+};
+
+struct RadialConfig {
+    float scale = 1.0f;
+    float center_x = 0.5f;
+    float center_y = 0.5f;
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+
+    float wheel_inner_radius = 120.0f;
+    float wheel_outer_radius = 250.0f;
+    bool wheel_hidden = false;
+
+    float central_panel_outer_radius = 112.0f;
+    bool central_panel_hidden = false;
+
+    float slot_inner_radius = 128.0f;
+    float slot_outer_radius = 242.0f;
+    float slot_gap_degrees = 3.0f;
+    bool slot_details = true;
+
+    float icon_size = 80.0f;
+    float opacity = 1.0f;
+    float screen_dim_opacity = 0.3f;
+    bool show_controls = true;
+
+    int editor_toggle_key = 0x76;
+    bool editor_toggle_shift = true;
+    bool editor_toggle_ctrl = false;
+    bool editor_toggle_alt = false;
+    float editor_ui_scale = 1.0f;
+
+    bool hdr = false;
+    float hdr_ui_brightness = 200.0f;
+    float hdr_ui_saturation = 1.0f;
+
+    Color screen_dim_color = {0, 0, 0, 255};
+    Color wheel_background_color = {24, 22, 19, 224};
+    Color wheel_border_color = {110, 95, 65, 180};
+    Color central_panel_background_color = {24, 22, 19, 224};
+    Color central_panel_border_color = {171, 148, 102, 190};
+    Color slot_background_color = {24, 22, 19, 224};
+    Color slot_selected_background_color = {40, 36, 30, 232};
+    Color slot_border_color = {110, 95, 65, 180};
+    Color slot_selected_sorcery_border_color = {155, 240, 255, 255};
+    Color slot_selected_incantation_border_color = {255, 219, 170, 255};
+    Color text_color = {244, 238, 223, 255};
+    Color icon_color = {255, 255, 255, 255};
+};
+
+void Load();
+void ReloadIfChanged();
+const RadialConfig& Get();
+RadialConfig& Edit();
+bool Save();
+
+}  // namespace radial_menu_mod::radial_config

@@ -20,5 +20,6 @@ bool IsOpen();
 int GetSelectedSlot();
 void UpdateSelectionFromDirection(float selection_x, float selection_y, std::size_t slot_count);
 void Draw(const std::vector<RadialSlot>& slots, const char* title, const char* controls);
+void DrawPreview(const std::vector<RadialSlot>& slots, const char* title, const char* controls, int selected_slot);
 
 }  // namespace radial_menu_mod::radial_menu
